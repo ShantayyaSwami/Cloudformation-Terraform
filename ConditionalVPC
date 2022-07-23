@@ -1,0 +1,25 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+ Tenancy:
+  Type: String
+  Default: default
+  AllowedValues: ['default','dedicated']
+Conditions:
+ VPCTenancy: !Equals 
+  - !Ref Tenancy
+  - dedicated
+Resources:
+ myVPC:
+  Type: AWS::EC2::VPC
+  Properties:
+    CidrBlock: 10.0.0.0/16
+    EnableDnsSupport: 'true'
+    EnableDnsHostnames: 'true'
+    IntanceTenancy: !If
+    - VPCTenancy
+    - dedicated
+    - default
+     - 
+    Tags:
+     - Key: stack
+       Value: production
