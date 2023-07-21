@@ -1,0 +1,293 @@
+-------------------Terraform fundamentals-------------------------
+terraform version: find the terraform version
+terraform -chdir=<path> <subcommand> : swicth to working directory
+terraform init : initialize the directory for terraform configuration
+terraform plan: create an execution plan (dry run)
+terraform apply: apply changes to create infrastruture.
+terraform destroy: destroy the created infra
+
+----------------Plan, Deploy and Cleanup commands------------------
+terraform plan -out <plan_name> : output a deployment plan 
+terraform plan destroy : output destroy plan 
+terraform apply <plan_name>: apply specific plan 
+terraform apply -taregt = <rsrc_name>: only apply changes to specific rsrc
+terraform apply -var my_variable=<var_name>: pass var in command line
+terraform providers: get providers info used in configuration
+
+-------------Terraform language---------------
+Terraform language's main purpose is to declare the resources,which are infa objects. 
+<BLOCK TYPE> "<BLOCK LABEL>" "<BLOCK LABEL>" {
+#Block body
+<identifier> = <expression> #argument
+}
+
+example: 
+resource "aws-vpc" "main"{
+cidr_block = var.base_cidr_block
+}
+
+--------------Directories and Files-----------------
+1. File extention: code in terrform language is stored in .tf or .tf.json file extention. 
+2. Directories and Modules: Modules are collection of .tf or .tf.json files kept together in directory.
+module consist of only top level config files in directory. nested directory is treated as separate module and may not be automatically included.
+3. Root module: current woking directory where tarrform is invoked. 
+
+-----------Override files-----------
+using override.tf 
+
+resource "aws_instance" "web"{
+instance_type = "t2.micro"		: terraform config example
+ami = "ami-408c7f28"
+}
+
+
+resource "aws_instance" "web"{
+ami = "foo"				: override.tf
+}
+
+
+resource "aws_instance" "web"{		: This is how the merge is treated
+instance_type = "t2.micro"
+ami = "foo"
+}
+
+# or //: single line comment 
+/* */ : multiline comment
+
+---------Working with Resources---------
+Resource are the most important part of terraform lang. resource block describe infra objects like virtual network,
+compute instance, DNS records etc
+
+Resource Types:
+Providers: which are plugins for terraform that offer a collection of resource types
+Argument: which are specific to selected resource type
+documentation: which every provider uses to describe its resource types and arguments.
+
+---------------Meta-Arguments-------------------
+depends_on: 	Specify hidden dependancies
+count:		count multiple resource instances according to count
+for_each: 	create multiple resources according to map or set of strings
+provider: 	select non-deafult provider configuration 
+lifecycle: 	set lifecycle customization
+provisioner and connections:  take extra action after resource creation. (bootstrap script)
+
+-----Operation timeouts--------------
+resource "aws_instance" "web"{
+timeouts{
+create="60m"				timeout string example:
+delete="2h"					"60m" "10s" "1h"
+}
+}
+There are some resource types that provide special timeouts,nested block arguments that allow for customization of how long
+certain operations are allowed to take before they are deemed failed. 
+
+----How configuration is applied---------
+1. create: create resources that exist in the configuration but not associated with real infra objects in state.
+2. destroy: destroy resource exist in the state but no longer exist in the configuration.
+3. update in-place: Update in-place resources whose arguments have changed. 
+4. Destroy and re-create: Destroy and re-create resources whose arguments have changed But which cannot be updated in-place
+due to remote api limitations. 
+
+-------Input variable-------------
+Input varibales serve as parameter for terraform module. This allow modules to be shared between different configuration.
+
+declaration:
+variable "image_id"{
+type = string
+}
+
+variable "availability_zone_names"{
+type = list(string)
+default=["us-west-1a"]
+}
+
+variable "docker_ports"{
+type = list(object({
+internal = number
+external = number
+protocol = string)})
+
+default = [ {
+internal = 8300
+external = 8300
+protocol = "tcp"
+}]
+}
+
+--- Arguments and Constraints---------
+default
+type 
+description		-- Optional arguments for variable decalaration
+validation
+sensitive
+
+Type constraint				Type constructors
+string					list,object
+number					set,tuple
+bool					map
+
+example:
+variable "image_id"{
+type = string
+description = "AMI"
+}
+
+variable "image_id"{					-- variable example with custom validation argument
+type = string
+description = "AMI"				
+validation{
+condition = length(var.image_id) > 4 && substr(var.image_id,0,4) == "ami-"
+error_message = "image id must be valid"
+}
+}
+
+variable "user_info"{				--- using sensitive argument 
+type = object({
+name = string
+address = string
+})
+sensitive = true
+}
+
+resource "some_resource" "a"{
+name = var.user_info.name
+address = var.user_info.address
+}
+
+----How to assign values to root module variables----
+1. In terraform cloud workspace
+2. -var command line option  (last priority)
+3. in variable definitions like .tfvars or .tfvars.json file   (2nd priority)
+4. env variable like export TF_VAR_ followed by name of variable   (1st priority of variable to be loaded)
+
+-------------Output Variables-------------
+they are like return values and have many uses
+1. child module can use them to expose subset of resource attributes to the parent module.
+2. Root module can use them to print values in CLI.
+3. Root module output can be accessed by other configurations via terraform-remote_state data source. 
+
+------Declaring an output varibale------------
+output "instance_ip_addr"{
+value = aws_instance.server.private_ip      -- expression result will be return to the user.
+}
+
+
+Arguments and Constraints:
+When accessing child module output in a parent module, the output of child module are available in expressions as 
+module.<module_name>.<output_name>
+
+description
+sensitive		--Optional arguments for variable declaration
+depends_on
+
+---------Argument example-----------
+#main.tf
+
+module "foo"{
+source = "./mod"
+}
+reource "test_instance" "x"{
+some_attribute = module.mod.a
+}
+output "out"{
+value = "xyz"
+sensitive = true
+}
+
+output "a"{
+value = "secret"
+sensitive = true
+}
+
+--------depends_on argument example---------
+output "instance_ip_addr"{
+value = aws_instance.server.private_ip							-- depends_on should always be used as
+description = "Private ip of server instance"						last resort. should always include 
+											comment why it is being used.
+depends_on=[
+# security group rule must be created before this IP address actually be used. 
+aws_security_group_rule.local_access
+]
+}
+
+
+
+---------------------Modules----------------------------------
+1. root module -- you need at leas one rot module
+2. child module -- modules that are called by root module.
+3. published module -- module that are loaded from public or private registry.
+
+--------calling a child module---------
+module "servers"{
+source = "./app_cluster"	--A root module that includes a module block is calling a child module. label(server) is
+servers = 5			used to refer to the module
+}
+
+4 module argument types:
+1. source argument is required for all modules.
+2. verson argument is reccom for modules from public registry.
+3. The input variable argument.
+4. The meta argument like for_each and depends_on
+
+example:						meta-arguments like
+module "consul"{					1. count
+source = "hashicorp/consul/aws"				2. for_each
+version = 0.0.5"					3. depends_on
+servers = 5						4. providers
+}
+
+----------module source------------------
+Module source tell terraform where to look for source code. terraform used the module source while module installaton
+step of terraform init
+There are 8 module source types:
+1. local paths				5. generic git 
+2. terraform registry			6. http urls
+3. github				7. S3 bucket
+4. bitbucket				8.GCS bucket
+
+module "consul"{
+source = "./consul"		--local module must start with ./ or ../
+}
+
+module "consul"{
+source = "hashicorp/consul/aws"		--public registry
+}
+
+module "consul"{
+source = "github.com/shantayya/example"		--github https url
+}
+
+module "consul"{
+source = "git@github.com:shantayya/example.git"		-- github ssh url
+}
+
+module "consul"{
+source = "https://example.com/vpc-module.zip"		-- fetching archives over http
+}
+
+----------------Expression and functions----------
+There are 7 types fo named values available in terraform
+1. Resources			5. Data sources
+2. input variables		6. filesystem and workspace info
+3. child modue outputs		7. Block-local values
+4. local values
+
+condition ? true_val : false_val		- conditional expression
+var.example ? 12 : "hello"
+
+----working with backend------------
+each terraform configuration can specify a backend.
+1. terraform begginers -- local backend
+2. if working with teams and large infra then use remote backend
+
+Two areas of terraform behavior are determined by backend:
+1. where the state is stored
+2. where the operations are performed. 
+
+
+
+
+
+
+
+
