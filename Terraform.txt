@@ -1,10 +1,149 @@
--------------------Terraform fundamentals-------------------------
+Infrastructure as Code(IaC) is the process of provisioning,configuring and managing infra like vm,db,n/w,lb etc through code and automation rather than manual process. 
+There are 2 common approaches:
+1. Declarative IaC: describes desired end state of infra and IaC tool figure out how to achieve it. Focus on what infra look like rather than specifying steps to get there. (ex: Terraform,CloudFormation, Azure Resource Manager template) 
+
+2. Imperative IaC: Involves specifying step by step instruction to achive end state. but commands need to be executed in right order. (ex: Ansible,chef,puppet)
+
+IaC tools are classified in 2 types:
+1. Infra provisioning tools: Terraform,CloudFormation, Azure (ARM) template, Google cloud deployment Manager etc
+2. Configuration management tool: Ansible, chef,puppet etc
+
+These 2 categories are mutually exclusive , as most configuration management tools can do some degree of provisioning and most provisioning tools can do some degree of configuration management. 
+
+Mutable vs Immutable infra:
+Mutable infra: Infra can be modified or updated once its provisioned makes version tracking much more difficult.
+Immutable infra: cannot be modified once provisioned. Involves provisioning new infra if existing infra must be changed. it eliminates configuration drift(changes to infra occurs over time that are not recorded), easy to version control. 
+
+Idempotence: No matter how many times you run IaC, your end up with same end state. If the desired end state is already achieved then system will not change any configuration even after running the IaC code again. 
+
+
+---------Terraform--------------
+Terraform is HashiCorp's infra as tool. Lets you define infra in human readable,declarative configuration files and manage your infra lifecycle. written in HCL. Terraform use the cloud provider APIs to provision infra.(cloud agnnostic)
+
+--providers--
+Terraform relies on plugins called providers to interact with cloud providers like aws,azure,gcp,saas providers etc. Terraform config must declare whcih provider they want so that terraform can install and use them. Additionally, some providers require additional config like credentials,versions,endpoint URL's,region details before they can be used.  
+ 
+Terraform workflow:
+Write ---------------------------------> Plan------------------------------------- --> Apply
+(define infra in config files. 		Dry run to preview changes before applying.	On Approval terraform provision infra from config files. 
+
+
+Terraform structure:
+project-root/
+|-- main.tf			--> contains main config of infra like definition of resouces(ec2,vpc,db etc)
+|-- variables.tf		--> declare input variables for your terraform. parametrized your code. 
+|-- outputs.tf			--> display info about deployed infra
+|-- terraform.tfvars		--> used to set specific values for the variables declared in variables.tf
+|-- providers.tf		--> define providers and their config
+|-- modules/			--> folder contains sub-modules for different parts of your infrastructure. each module can have its own .tf files as above. 
+|   |-- networking/
+|   |   |-- main.tf
+|   |   |-- variables.tf
+|   |   |-- outputs.tf
+|   |-- compute/
+|       |-- main.tf
+|       |-- variables.tf
+|       |-- outputs.tf
+|-- .terraform/			--> directory contains the local Terraform state and other Terraform-related files.
+|-- terraform.tfstate		--> contains the current state of your infrastructure. It is managed by Terraform and should not be modified manually.
+|-- terraform.tfstate.backup	--> Backup of the state file and is automatically created by Terraform.
+	
+
+1. Terraform block: Specifies the required providers that terraform should download before exicuting the terraform script. block contains source(from where terraform should download provider) and its version
+
+terraform {
+  required_providers{
+   aws{
+       source =  "hashicorp/aws"
+       version = "5.22.0"
+     }
+   }
+}
+
+2. Provider block: Specifies cloud provider and credentials required to connect to providers service. includes name,version,access key an secret key(for aws)
+provider "aws" {
+  region = "ap-south-1"
+  access_key = "my-access-key"
+  secret_key = "my_secret_key"
+ }
+
+
+3. Resource Block: Resources are the most imp element in terraform language. each resource block describes one or more infra object like ec2, db, lb etc
+resource "aws_instance" "web" {
+ ami = "ami-123321"
+ instance_type = "t2.micro"
+ tags = {
+  Env = "PROD"
+  }
+}
+
+
+4. Variable Block: defines input variable to be used in terraform config. includes description, type and default value (if not set then prompt for input)
+ variable "bucket_name" {
+   description = " Name fo s3 bucket"
+   type = string
+   default = "my-terraform-bucket"
+ }
+
+5. Output Block: makes information about infra available on CLI
+resource "aws_instance" "web"{
+ ami = "ami-1233221"
+ instance_type = "t2.micro"
+ }
+
+output "ec2_ip" {
+ value = aws_instance.web.public_ip
+}
+
+
+6. Data block: Its similar to resource black however it does not create or manages the resource rather it fetches info about existing infra objects. 
+data "aws_instance" "my_ec2" {
+  depends_on = [aws_instance.web]
+  id = aws_instance.web.id
+ }
+  
+7. Module block:
+8. Local Values block: 
+
+
+Terraform state: its JSON file that stores info about resources that terraform manages as well as their current state and dependancies. This file keeps track of remote state of infra created by config and maps them to real world resource. Terraform uses state file to decide changes that need to be made when new config is applied. 
+
+when you execute terraform apply, a new terraform.tfstate is created and previous state is written into backup file terraform.tfstate.backup. the state file can be kept locally where terraform is running or remotely using remote backend (s3, hashicorp consul, azure storage account etc)
+
+
+-------------Terraform language---------------
+Terraform language's main purpose is to declare the resources,which are infa objects. 
+<BLOCK TYPE> "<BLOCK LABEL>" "<BLOCK LABEL>" {
+#Block body
+<identifier> = <expression> #argument (key,value)
+}
+
+example: 
+resource "aws_vpc" "main"{
+cidr_block = var.base_cidr_block
+}
+
+
+Argument vs attributes referrence
+Arguments are defined as input variables iin resource or module's configuration. Where as attribute is used to retrieve info from resource that has already been created. it represents output of resource. 
+
+
+-------------------Terraform CLI commands-------------------------
 terraform version: find the terraform version
 terraform -chdir=<path> <subcommand> : swicth to working directory
-terraform init : initialize the directory for terraform configuration
+
+terraform init : initialize the directory for terraform configuration. mainly download required provider,modules any if referrenced in config  and install them locally to use them execute tf scripts --> creates lock file(terraform.locl.hcl) which records exact version of providers and modules installed --> creates .terraform dir where it installs providers and modules. 
+
+terraform fmt : format the indentation of tf script.
+terraform validate: validates the syntax 
 terraform plan: create an execution plan (dry run)
-terraform apply: apply changes to create infrastruture.
-terraform destroy: destroy the created infra
+
+terraform apply: when you run apply, terraform always run plan first then get the prompt to accept changes. once appoved then provision infra by applying changes. 
+use -auto-approve to skip prompt (useful in CI/CD pipeline) --> updates state file to reflect new infra chnages + display output if output block defined. 
+
+terraform destroy: destroy the created infra. 1st taraform locks project state (so that no other instance of terraform modify or apply changes to terraform resource) --> create plan to destroy resource and wait for approval --> once approved, destroy --> state file wil be updated with new state of resource
+
+terraform show: shows attributes and properties of provisioned resources --> this output is read from state file. 
 
 ----------------Plan, Deploy and Cleanup commands------------------
 terraform plan -out <plan_name> : output a deployment plan 
@@ -14,16 +153,314 @@ terraform apply -taregt = <rsrc_name>: only apply changes to specific rsrc
 terraform apply -var my_variable=<var_name>: pass var in command line
 terraform providers: get providers info used in configuration
 
--------------Terraform language---------------
-Terraform language's main purpose is to declare the resources,which are infa objects. 
-<BLOCK TYPE> "<BLOCK LABEL>" "<BLOCK LABEL>" {
-#Block body
-<identifier> = <expression> #argument
+
+
+----Provider version contraints----- 
+Used to set the accpetable range of versions for provider or module. If version is not specified then terraform downloads latest version 
+Specify range of versions using various operators:
+1. != excludes an exact version number
+2. >=,<=,>,< greater,lower than equal to specified version
+3. ~> only the rightmost version number(patch) to increase. (ex: 5.13.1  --> allowed 5.13.2 not 5.13.0)
+
+manage terraform version:
+Set the required_version = to control the version of terraform  that your config use and make updates more predictable. Avoid usiing floating versions ~>, which can lead to unexpected update. Version locking helps you to maintain consistency and predictability in your infra. 
+
+-----Multiple provider configuration -----------
+Primary reason for this is to support multiple regions for cloud platform. use alias meta-argument segament to provide an extra name segment. 
+use <PROVIDER NAME>.alias for using it. 
+
+terraform {
+ required_providers{
+  aws {
+    source = "hashicorp/aws"
+    version = "5.22.0"
+   }
 }
 
-example: 
-resource "aws-vpc" "main"{
-cidr_block = var.base_cidr_block
+provider "aws"{
+   region = 'ap-south-1"
+   profile = "default"
+  }
+
+provider "aws"{
+  region = "us-east-1"
+  profile = "default"
+  alias = "us-east-1"
+ }
+
+resource "aws_instance" "web"{
+   region = aws
+ }
+
+region "aws_instance" "db"{
+  region = us-east-1
+ }
+
+
+-----Local provider-------
+Used to manage local resources such as creating files.
+
+resource "local_file" "login"{
+   content = "echo logging in"
+   filename  = "./login.sh"
+ }
+
+resource "local_sensitive_file" "password"{
+  content = "admin1233"
+  filename = "./password.txt"
+}
+
+----Random provider------ 
+The random provider allows the use of randomness within terraform configuration. This is terraform logical provider, works entirely within terraforms logic and does not interact with any other resource. 
+(random_id, random_integer, random_pet, random_shuffle, random_string, random_uuid). ex: random_pet genrates random pet names which can be used as unique identifier with other resources. 
+
+resource "random_pet" "serverName" {
+  length = 3
+  prefix = "ec2"
+  seperator = "-"
+ }
+
+resource "aws_instance" "web"{
+  ami = "ami-12sw12"
+  instance_type = "t2.micro"
+ 
+  tags  = {
+    Name = random_pet.serverName.id
+ }
+}
+
+
+
+---------------Input variables--------------------
+Way to parameterize your config files. typically defined in separate variable files ( variables.tf) to keep code organized. terraform loads all files ending .tf s can name anything. 
+variable block arguments:
+description, type, default, sensitive (does not display but records in state file)
+
+Data Types allowed:
+string					list,object
+number					set,tuple
+bool					map
+
+declaration:
+variable "image_id"{
+type = string
+}
+
+variable "availability_zone_names"{
+type = list(string)
+default=["us-west-1a"]
+}
+
+variable "docker_ports"{
+type = list(object({
+internal = number
+external = number
+protocol = string)})
+
+default = [ {
+internal = 8300
+external = 8300
+protocol = "tcp"
+}]
+}
+
+variable "image_id"{					-- variable example with custom validation argument
+type = string
+description = "AMI"				
+validation{
+condition = length(var.image_id) > 4 && substr(var.image_id,0,4) == "ami-"
+error_message = "image id must be valid"
+}
+}
+
+supply variable values: 
+1. variable default: specified in variable block (above)
+2. command line flags: terraform apply -var="key=value" or -var='list=["ami1","ami2"]' or -var='map={key: value,key: value}'
+3. File based variable: provided through separate file named terraform.tfvars and -var-file=variables.tfvars
+resource "aws_instance" "web"{
+ ami = var.ami
+ instance_type = var.type
+ 
+ tags  = {
+   Name = var.name
+ }
+}
+
+variables.tfvars
+ami = "ami-0912f71e06545ad88"
+type = "t2.micro"
+name = "dev"
+
+
+4. Environment variable: export TF_VAR_name=value
+
+Precedence:
+1. -var or -var-file       --> highest precendence 
+2. *.auto.tfvars
+3. terraform.tfvars.json
+4. terraform.tfvars
+5. Env variables
+
+---Local variables----
+like temp local variable defined within functions of pgrm language. set of local values can be declared together in local block and can be called using local.<NAME>
+you can also define in separate file called locals.tf
+
+
+-----------------------------Output Values---------------------------------------
+they are like return values in prgm langauge and have many uses
+1. child module can use them to expose subset of resource attributes to the parent module.
+2. Root module can use them to print values in CLI.
+3. Root module output can be accessed by other configurations via terraform-remote_state data source. 
+
+can be declared using output block and file called output.tf
+ex: 
+resource "aws_instance" "server"{
+ ami = "---"
+ instance_type = "---"
+}
+output "instance_ip_addr"{
+value = aws_instance.server.private_ip      -- expression result will be return to the user.
+}
+
+
+Arguments:
+When accessing child module output in a parent module, the output of child module are available in expressions as 
+module.<module_name>.<output_name>
+
+description
+sensitive		--Optional arguments for variable declaration
+depends_on
+
+
+#main.tf
+module "foo"{
+source = "./mod"
+}
+resource "test_instance" "x"{
+some_attribute = module.mod.a
+}
+output "out"{
+value = "xyz"
+sensitive = true
+}
+
+output "a"{
+value = "secret"
+sensitive = true
+}
+
+--------depends_on argument example---------
+output "instance_ip_addr"{
+value = aws_instance.server.private_ip							-- depends_on should always be used as
+description = "Private ip of server instance"						last resort. should always include 
+											comment why it is being used.
+depends_on=[
+# security group rule must be created before this IP address actually be used. 
+aws_security_group_rule.local_access
+]
+}
+
+
+------------------------------------Data Sources-----------------------------------------------
+In Terraform data sources are used to retrieve info from external sources and make it available for use in your infra code. Data sources are defined using data block
+data "data_source_type" "data_source_name" {
+ agrument = value 
+}
+
+ex: local_file,aws_caller_indentity,aws_ami(used to get ID of registered AMI for use in other rsrc) ,most_recent(use most recent one if terraform find match less than one) etc
+data "aws_caller_identity" "current"{
+ }
+
+output "account_id"{
+ value = data.aws_caller_identity.current.account_id
+}
+ 
+data "aws_key_pair" "existing_pair" {				--> use existing ec2 key pair to launch new instance. 
+ key_name = "ansible"
+
+}
+resource "aws_instance" "web"{
+ ami = "ami12321"
+ instance_type = "t2.micro"
+ key_pair = data.aws_key_pair.existing_pair.key_name
+ tags  = {
+  Name = "webserver"
+ }
+}
+
+Filter function: used with data sources when you need to filter the results returned by data sources based on specific criteria. 
+resource "aws_instance" "web"{
+ ami = "ami12321"
+ instance_type = "t2.micro"
+ key_pair = data.aws_key_pair.existing_pair.key_name
+ tags  = {
+  Name = "Webserver"
+ }
+}
+
+data "aws_instance""filtered_instance"{
+ filter {
+   name = "tag:Name"
+   values = ["webserver"]
+  }
+ depends_on = [aws_instance.web]			--> depends_on meta argument used to define explicit dependancies between resources. 
+}
+
+
+data "aws_ami" "amazon_linux"{
+  most_recent = true
+  owners = ["amazon"]
+ }
+output "filtered_ami"{
+ value = data.aws_ami.amazon_linux
+}
+
+
+------------------------------------Terraform provisioners---------------------------------------------------
+Provisioners are used to execute script or actions on remote resources once they created. Provisioners are allow to perform configuration maagement tasks like installing software,running scripts etc
+But provisioners are used as Last resort because they introduce complexity and uncertainty to terraform workflows as terraform runs the script but does not know what script does. 
+Supports several types of provisioners:
+1. File provisioners: Used to copy files or dir to newly created resource. require one or more connection block to access remote resource. 
+resource "aws_instance" "web"{
+  ami = "---"
+  instance_type = "--"
+  provisioner file {
+     source = "./id_rsa.pub"
+     destination = "/home/adm_swami/.ssh/id_rsa.pub"
+  }
+  
+  connection {
+    type = "ssh"
+    user = "ansible"
+    private_key = file("demo.key")  or password = "${var.password}"
+    host = aws_instance.web.public_ip   (wrong)  			 --> expressions in connection block cannot refer to their parent resource by name. 
+    host = self.public_ip							instead we use self keyword to refer to parents resource. 
+  }
+}
+
+Note: connection block can be nested within either resource (affects all resource provisioners) or provisioner (affects only this provisioner) block
+
+2. Local Exec provisioners: run scripts or commands on machine where Terraform is executed after resource is created. ex: running an ansible playbook
+
+3. Remote Exec provisioners: run scripts or commands on remote machine over SSH or WinRM
+ 
+
+
+
+---------------------------------------Funtions--------------------------------------------------
+Element function: retrieves a single element from list. 
+syntax: element(list,index)
+
+file function: reads the content of file at given path and returns them as string. 
+resource "aws_key_pair" "demo"{
+  key_name = "ansible"
+  public_ey = file("demo_key.pub")
+}
+
+resource "aws_instance" "web"{
+  key_name = aws_key_pair.demo.key_name
+  ami = "---"
+  instance_type = "--"
 }
 
 --------------Directories and Files-----------------
@@ -88,128 +525,13 @@ certain operations are allowed to take before they are deemed failed.
 4. Destroy and re-create: Destroy and re-create resources whose arguments have changed But which cannot be updated in-place
 due to remote api limitations. 
 
--------Input variable-------------
-Input varibales serve as parameter for terraform module. This allow modules to be shared between different configuration.
 
-declaration:
-variable "image_id"{
-type = string
-}
-
-variable "availability_zone_names"{
-type = list(string)
-default=["us-west-1a"]
-}
-
-variable "docker_ports"{
-type = list(object({
-internal = number
-external = number
-protocol = string)})
-
-default = [ {
-internal = 8300
-external = 8300
-protocol = "tcp"
-}]
-}
-
---- Arguments and Constraints---------
-default
-type 
-description		-- Optional arguments for variable decalaration
-validation
-sensitive
-
-Type constraint				Type constructors
-string					list,object
-number					set,tuple
-bool					map
-
-example:
-variable "image_id"{
-type = string
-description = "AMI"
-}
-
-variable "image_id"{					-- variable example with custom validation argument
-type = string
-description = "AMI"				
-validation{
-condition = length(var.image_id) > 4 && substr(var.image_id,0,4) == "ami-"
-error_message = "image id must be valid"
-}
-}
-
-variable "user_info"{				--- using sensitive argument 
-type = object({
-name = string
-address = string
-})
-sensitive = true
-}
-
-resource "some_resource" "a"{
-name = var.user_info.name
-address = var.user_info.address
-}
 
 ----How to assign values to root module variables----
 1. In terraform cloud workspace
 2. -var command line option  (last priority)
 3. in variable definitions like .tfvars or .tfvars.json file   (2nd priority)
 4. env variable like export TF_VAR_ followed by name of variable   (1st priority of variable to be loaded)
-
--------------Output Variables-------------
-they are like return values and have many uses
-1. child module can use them to expose subset of resource attributes to the parent module.
-2. Root module can use them to print values in CLI.
-3. Root module output can be accessed by other configurations via terraform-remote_state data source. 
-
-------Declaring an output varibale------------
-output "instance_ip_addr"{
-value = aws_instance.server.private_ip      -- expression result will be return to the user.
-}
-
-
-Arguments and Constraints:
-When accessing child module output in a parent module, the output of child module are available in expressions as 
-module.<module_name>.<output_name>
-
-description
-sensitive		--Optional arguments for variable declaration
-depends_on
-
----------Argument example-----------
-#main.tf
-
-module "foo"{
-source = "./mod"
-}
-reource "test_instance" "x"{
-some_attribute = module.mod.a
-}
-output "out"{
-value = "xyz"
-sensitive = true
-}
-
-output "a"{
-value = "secret"
-sensitive = true
-}
-
---------depends_on argument example---------
-output "instance_ip_addr"{
-value = aws_instance.server.private_ip							-- depends_on should always be used as
-description = "Private ip of server instance"						last resort. should always include 
-											comment why it is being used.
-depends_on=[
-# security group rule must be created before this IP address actually be used. 
-aws_security_group_rule.local_access
-]
-}
-
 
 
 ---------------------Modules----------------------------------
@@ -243,7 +565,7 @@ There are 8 module source types:
 1. local paths				5. generic git 
 2. terraform registry			6. http urls
 3. github				7. S3 bucket
-4. bitbucket				8.GCS bucket
+4. bitbucket				8. GCS bucket
 
 module "consul"{
 source = "./consul"		--local module must start with ./ or ../
@@ -284,10 +606,154 @@ Two areas of terraform behavior are determined by backend:
 1. where the state is stored
 2. where the operations are performed. 
 
+------------------------------------------------Terraform scripts------------------------------------
+#Provision AWS ec2 using terraform
+1. Terraform CLI installed
+2. AWS CLI installed and configured (to use IAM crdentials to auth terraform aws provider)
+
+terraform {
+  required_providers{
+   aws{
+       source = "hashicorp/aws" 	
+       version = "5.22.0"			--> aws provider version	
+      }
+required_version = ">0.13.0"			--> terraform CLI version	
+}
+   provider  "aws" {
+      region = "ap-south-1"
+      }
+ 
+resource "aws_instance" "web"{
+   ami = "ami12123"
+   instance_type = "t2.micro"
+   
+   tags = {
+     Name = "Dev"
+     }
+ }
 
 
+---------------------Create mysql rds db using terraform------------
+#provider.tf 
+terraform {
+  required_providers{
+    aws {
+       source = "hashicorp/aws"
+       version = "5.22.0"
+       }
+  }
+
+provider "aws"{
+   region = var.region
+   profile = var.default
+ }
+
+#variable.tf
+variable "region" {
+  default = "ap-south-1"
+}
+
+variable "storage"{
+ type = number
+ default = 2
+}
+
+variable "username"{
+ default = "admin"
+}
+
+variable "password"{
+ sensitive = true
+}
+
+#main.tf
+resource "aws_db_instance" "mydb"{
+  allocated_storage = var.storage
+  db_name = "mydb"
+  engine = "mysql"
+  engine_version = "5.7"
+  instance_class = "db.t3.micro"
+  username = var.username
+  password = var.password
+  parameter_group_name = "default.mysql5.7" 
+  skip_final_snapshot = true
+  publically_accessible = true
+}
+
+#output.tf
+output "address"{
+ value = aws_db_instance.mydb.address
+}
+
+output "endpoint"{
+ value = aws_db_instance.mydb.endpoint
+}
 
 
+------------------create security group ---------------------
+resource "aws_security_group" "allow_tls"{
+  name = "allow_tls"
+  description = "allow traffic on port 22 and port 80"
+  ingress {
+    description = "allow traffic on port 22"
+    from_port = 22
+    to_port = 22
+    protocol = "tcp" 
+    cidr_range = [0.0.0.0/0]
+    ipv6_cidr_range = [::/0]
+   }
+  ingress {
+    
+    description = "allow traffic on port 80"
+    from_port = 80
+    to_port = 80
+    protocol = "tcp" 
+    cidr_range = [0.0.0.0/0]
+    ipv6_cidr_range = [::/0]
+ }
+
+ tags = {
+   Name = "sg"
+  }
+}
+
+resource "aws_instance" "web"{
+   ami = "ami12123"
+   instance_type = "t2.micro"
+   security_groups = [aws_security_group.allow_tls]
+   tags = {
+     Name = "Dev"
+     }
+   depends_on = [aws_security_group.allow_tls]
+ }
 
 
+-------------AWS user data through file function and variables----
+When user data script is processed it is copied to  and run from /var/lib/cloud/instances/instance-id/
+The log of userdata are stored in /var/log/cloud-init-output.log
 
+variable "user_data"{
+ type = string
+ default = <<- EOF
+   sudo yum update 
+   sudo yum install httpd
+   sudo systemctl enable httpd --now
+ EOF
+ }
+
+#script.sh
+sudo yum update 
+sudo yum install httpd
+sudo systemctl enable httpd --now
+
+resource "aws_instance" "web"{
+ ami = var.ami
+ instance_type = var.instance_type
+ key_name = aws_key_pair.demo.key_name
+ security_groups = [aws_security_group.allow_tls]
+ 
+ user_date = file("script.sh") or var.user_data
+ tags = {
+   Name = "WebServer"
+  }
+}
