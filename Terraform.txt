@@ -441,10 +441,125 @@ resource "aws_instance" "web"{
 Note: connection block can be nested within either resource (affects all resource provisioners) or provisioner (affects only this provisioner) block
 
 2. Local Exec provisioners: run scripts or commands on machine where Terraform is executed after resource is created. ex: running an ansible playbook
+Failure Behavior:
+by default, provisioners that wil fail also cause Terraform apply itself to fail. on_failure setting can be used to change this behaviour. 
+coontiue: makes terraform to ignore and continue
+fail: terraform will raise an error and stop applying. 
+
+Creation time provisioners: only run during creation, not during update or any other lifecycle. if fails then resource is marked as tainted. tainted resource will be planned for destruction and recreation upon the next apply.  
+
+destroy time provisioners: run before the resource is destroyed. If fail then terraform will error and rerun the provisioners again n next terraform apply. 
+provisioner "local-exec"{
+  when = create/destroy
+  command = "echo 'Instance created/destroyed'"
+  on_failure = continue/fail
+ }
+
+Null Resource: resource type that does not directly manage any infra. used for running local scripts, executing remote commands. provides a way to interact with external systems. 
+
+resource "null_resource" "example"{
+  triggers = {					--> triger block used to specify set of values that when changed will cause the null resource to be recreated. 
+      timestamp = "$"{timestamp()}"
+    }
+  provisioner "local-exec" {
+    command = "echo 'hello world'"
+  }
+}
 
 3. Remote Exec provisioners: run scripts or commands on remote machine over SSH or WinRM
- 
+ resource "aws_instance" "web"{
+  ami = "---"
+  instance_type = "--"
+  provisioner "remote_exec" {
+     inline = [				--> each command is separated by ,
+	"sudo yum update -y",
+        "sudo yum install httpd -y",
+        "sudo systemctl enable httpd --now"
+     ]
+  }
+  
+  connection {
+    type = "ssh"
+    user = "ansible"
+    private_key = file("demo.key")  or password = "${var.password}"
+    host = aws_instance.web.public_ip   (wrong)  			 --> expressions in connection block cannot refer to their parent resource by name. 
+    host = self.public_ip							instead we use self keyword to refer to parents resource. 
+  }
+}
 
+
+
+---------------------State Management-------------------------------
+The Terraform state is necessary step for terraform to function, which maps real world infra to your config, keep track of your metadata(to create dependancy order for terraform apply and destroy operation) and to improve performance of large infra(Terraform stores a cache of attribute values for all resources in the state). 
+
+When terraform creates a remote object, it will record identity of remote object in the state file.
+Prior to any operation, Terraform does a refresh to update the state with real infra. 
+
+ex: resource "aws_instance" "web" in config maps to the instance i-abcd1223 in the real infra. 
+"refresh" step refers to the process of reconciling the Terraform state with the real-world resources in your infrastructure. 
+
+Local Backend: Terraform stores the state file in current working directory where terraform runs. this is called local backend. 
+Remote state backends(store state file remotely in s3): provide solution for collaboration, state locking, access control,  and data protection, making them a more reliable and secure option for managing infra. 
+ 
+terraform state list 								--> list all the resources in current state file. 
+terraform state show <resource_type>.<resource_name> 				--> views attribute and values of specific resource 
+terraform state mv <resource_type>.<old_name> <resource_type>.<new_name>	--> change resource name without recreating it. 
+terraform state rm <resource_type>.<resource_name>				--> Remove specified instance from state file. 
+terraform state pull > new.tfstate 						--> manually pull remote state data from remote backend and save to file. 
+terraform state push								--> push the state file to remote backend 
+terraform state replace-provider <old_provider> <new_provider> 			--> change the provider config 
+
+
+----Detecting and managing drift-----
+Drift is the term for when the real-world state of your infra differes from the state defined in your config. drift can be introduced manually or any automation tool
+so Terraform cannot detect drift of resources
+
+Refresh-only mode:
+terraform refresh (depricated)--> used to reconcile real world resources in your infra with terraform state. Its primarily used when you suspect that state has drifted out of sync with actual resources in infra. 
+
+terraform plan -refresh-only or terraform apply -refresh-only
+
+
+-----S3 as remote backend and DynamoDB to lock state file-----------
+Aws S3 is also not immune to race condition (if multiple terraform run attempts to write to the same state file). S3 does not provide built in locking mechanisms for state file. 
+
+terraform.lock.hcl 			-->  is primarily associated with managing module dependencies.
+terraform.tfstate.lock.info 		--> is associated with the state locking mechanism when using remote backends.
+
+Terraform will store the state within S3 and DynamoDB is used for state locking while performing changes. it ensures that only one user or process can update the state file at a time, preventing data corruption and race condition. 
+
+1. Creat an S3 bucket
+2. Create DynamoDB table.  --> Table must have partition key named LockID with type string. if not configured state locking will be disabled.  
+3. Configure your Terraform Backend.  --> specify S3 bucket and DynamoDB table  as backend config using backend block
+
+terraform {
+  required_providers{
+    aws {
+       source = "hashicorp/aws"
+       version = "5.22.0"
+       }
+    }
+}
+
+provider "aws"{
+  region = "ap-south-1"
+ }
+
+backend "s3"{						--> can also be created using terraform		resource "aws_s3_bucket" "statefile_bucket"{
+  bucket  = "statefile-2023"	or aws_s3_bucket.statefile_bucket						bucket = "statefile-2023"
+  region = "ap-south-1"												
+  key = "terraform.tfstate"											}
+  dynamodb_table = "statelock-2023" or aws_dynamodb_table.statelock_table					resource "aws_dynamodb_table" "statelock_table"{
+}														name = "statelock-2023"
+														hash_key = "LockID"
+resource "aws_instance" "web"{											attribute = {
+ ami =  "ami-0912f71e06545ad88"												name = "LockID"
+ instance_type = "t2.micro"												type = "S"
+ 															}
+ tags = {													}
+  Name = "WebServer"
+  }
+}
 
 
 ---------------------------------------Funtions--------------------------------------------------
@@ -712,6 +827,15 @@ resource "aws_security_group" "allow_tls"{
     ipv6_cidr_range = [::/0]
  }
 
+egress {
+   description  = "allow all outgoing traffic"
+   from_port = 0
+   to_port = 0
+   protocol = "-1"
+   cidr_range = [0.0.0.0/0]
+   ipv6_cidr_range = [::/0]
+}
+
  tags = {
    Name = "sg"
   }
@@ -757,3 +881,97 @@ resource "aws_instance" "web"{
    Name = "WebServer"
   }
 }
+
+
+---------------------Using null resource and local exec provisioner to create ansible host file----------
+variable.tf
+variable "instance_count"{
+  type = number 
+  default = 3
+ }
+
+variable "ami"{
+  ami = "ami-0912f71e06545ad88"
+}
+
+variable "instance_type"{
+ default = "t2.micro"
+}
+
+
+resource "aws_instance" "web"{
+  ami = var.ami
+  instance_type = var.instance_type
+  count = var.instance_count
+
+  tags = {
+    Name = "WebServer"
+   }
+  
+#  provisioner "local-exec" {					--> local-exec provisioner will execute every time new instance created but what if instance already       #	command = "echo ${self.public_ip} >> ./hosts"			created? create null resource and execute loca provisioner then 
+  }	
+}
+
+
+resource "null_resource" "print_ip" {
+  count = length(aws_instance.web)
+  
+  provisioner "local-exec" {
+    command = "echo ${element(aws_instance.web[*].public_ip,count.index)} >> ./hosts"
+  }
+}
+
+
+--------------Terraform Ansible integration----------------------
+1. confiure AWS CLI and iam user with admin permissions
+2. install ansible and terraform
+
+#install_http.yaml
+become: true
+become_user: ec2-user
+tasks:
+  - name: install httpd
+    yum:
+     name: httpd
+     state: latest
+    notify: start and enable httpd
+  - name: copy web page
+    copy:
+     src: index.html
+     dest: /var/www/html/index.html
+handlers:
+  - name: start and enable httpd
+    service:
+     name: httpd
+     state: started
+     enabled: yes
+
+variable.tf
+variable "instance_count"{
+  type = number
+  default = 3
+}
+
+resource "aws_instance" "web"{
+ ami = "ami-0912f71e06545ad88"
+ instance_type = "t2.micro"
+ count = var.instance_count
+ 
+ tags = {
+   Name = "WebServer-${count.index}"
+ }
+
+ provisioner "local-exec" {
+   command = "echo ${element(aws_instance.web[*].pubic_ip,count.index)} >> ./hosts"
+  }
+
+ provisioner "local-exec" {
+   command = "ansible-playbook -i hosts install_http.yaml"   or "ansible-playbook -i '${self.public_ip,}' install_http.yaml"
+ }
+
+}
+
+output "access_url"{
+  value = "http://${aws_instance.web.public_ip}"
+}
+
