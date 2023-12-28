@@ -51,7 +51,7 @@ project-root/
 
 1. Terraform block: Specifies the required providers that terraform should download before exicuting the terraform script. block contains source(from where terraform should download provider) and its version
 
-terraform {
+terraform {				--> If we miss to include terraform block then based on the provider terraform install required provider
   required_providers{
    aws{
        source =  "hashicorp/aws"
@@ -562,6 +562,231 @@ resource "aws_instance" "web"{											attribute = {
 }
 
 
+--------------------------Terraform workspace-----------------------
+Terraform workspaces focus on managing different environments and configurations within a single codebase (single terraform configuration), with a primary emphasis on state isolation. (DRY approach)
+Specially useful in scenarios where you have multiple deployment env. (dev,stage and prod etc)
+terraform.tfstate.d/(dev/stage/prod)/terraform.tfstate			--> state isolation 
+
+Terraform start with single,default workspace called default which cannot delete. 
+terraform workspace new <name>				--> create workspace
+terraform workspace list				--> list workspace
+terraform workspace select <name>			--> select workspace
+terraform workspace show				--> show current workspace
+terraform workspace delete <name>			--> delete workspace. (should be in different workspace to delete)
+
+#provider.tf
+terraform {
+  required_providers{
+    aws{
+        source = "hashicorp/aws"
+        version = "5.22.0"
+      }
+  }
+}
+
+provider "aws"{
+  region = "ap-south-1"
+  profile = "default"
+ }
+
+#variable.tf
+variable "instance_count"{
+  type = map(number)
+  default =  {
+   "dev" = 2
+   "stage" = 4
+   "prod" = 4
+ }
+}
+variable "ami" {
+  type = map(string)
+  default = {
+   "dev" = "ami-0912f71e06545ad88"
+   "stage" = "ami-0912f71e06545ad88"
+   "prod" = "ami-0912f71e06545ad88"
+  }
+}
+
+variable "instance_type"{
+  type = map(string)
+  default = {
+   "dev" = "t2.micro"
+   "stage" = "t2.medium"
+   "prod" = "t2.large"
+  }
+}
+
+#main.tf
+resource "aws_instance" "web"{
+  ami = lookup(var.ami,terraform.workspace)
+  instance_type = lookup(var.instance_type,terraform.workspace)
+  count = lookup(var.instance_count,terraform.workspace)
+
+  tags = {
+     Env = "${terraform.workspace}"
+    }
+}
+
+#output.tf
+output "instance_ip"{
+ value = aws_instance.web[*].public_ip
+ }
+
+
+
+-------------------------------------------Modules----------------------------------
+Terraform modules are powerful feature that helps in writing modular, maintainable and reusable infra code, making infra management more efficient and scalable. 
+you can define set of resources, configurations, and variables within modules and then reuse that module in multiple terraform configurations. 
+you can find prebuilt modules in terraform registry.
+
+
+1. root module -- Every Terraform confguration has atleast one module, known as rot module, which consist of resources in .tf files in the main working directory. 
+2. child module -- modules that are called by root module.
+3. published module -- module that are loaded from public or private registry. (Terraform registry or GitHub)
+
+project/			--> root module
+|-- main.tf			
+|-- variables.tf		 
+|-- outputs.tf			
+|-- terraform.tfvars		
+|-- providers.tf		--> provider configuration can be defined only in root module. 
+|-- modules/			--> child module
+|   |-- networking/
+|   |   |-- main.tf
+|   |   |-- variables.tf
+|   |   |-- outputs.tf		--> say it has output "instance_ip" { value = aws_instance.web.public_ip }. this is referred below
+|   |-- compute/
+|       |-- main.tf
+|       |-- variables.tf
+|       |-- outputs.tf
+|-- .terraform/			
+|-- terraform.tfstate		
+|-- terraform.tfstate.backup
+
+
+calling a child module:
+module "local_name"{
+source = "path to module"		--> "./modules/networking" from above structure
+#arguments		
+ providers = {
+   aws = aws.eu2			--> ecu2 is alias of provider defined in provider.tf 	
+}
+
+Note: Providers configurations can be passed down to decendent modules 1. implicitly 2. explicitly via provider argument within module block. 
+
+4 module argument types:
+1. source argument is required for all modules.
+2. verson argument is reccom for modules from public registry.
+3. The input variable argument.
+4. The meta argument like for_each and depends_on
+
+example:						meta-arguments like
+module "consul"{					1. count
+source = "hashicorp/consul/aws"				2. for_each
+version = 0.0.5"					3. depends_on
+							4. providers
+}
+
+Module Source:
+Module source tell terraform where to look for source code. terraform used the module source while module installaton
+step of terraform init
+There are 8 module source types:
+1. local paths				5. generic git 
+2. terraform registry			6. http urls
+3. github				7. S3 bucket
+4. bitbucket				8. GCS bucket
+
+module "consul"{
+source = "./consul"		--local module must start with ./ or ../
+}
+
+module "consul"{
+source = "hashicorp/consul/aws"		--public registry
+}
+
+module "consul"{
+source = "github.com/shantayya/example"		--github https url
+}
+
+module "consul"{
+source = "git@github.com:shantayya/example.git"		-- github ssh url
+}
+
+module "consul"{
+source = "https://example.com/vpc-module.zip"		-- fetching archives over http
+}
+
+
+Accessing module output values:
+module.child_module_local_name.output_local_name			--> module.networking.instance_ip(for single ip) module.networking.public_ips (list)
+
+
+#ec2/modules/create-ec2/main.tf
+resource "aws_instance" "web"{
+  ami = var.ami
+  instance_type = var.instance_type
+  count = var.instance_count
+ }
+
+#ec2/modules/create-ec2/variables.tf
+variable "ami"{
+  default = "ami-0912f71e06545ad88"
+}
+
+variable "instance_type"{
+ default = "t2.micro"
+}
+
+variable "instance_count"{
+ type = number
+ default = 1
+}
+
+
+#ec2/modules/create-ec2/output.tf
+output "public_ip"{
+ value = aws_instance.web[*].public_ip
+}
+
+
+#ec2/provider.tf
+terraform {
+  required_providers {
+    aws {
+      source = "hashicorp/aws"
+      version = "5.22.0"
+     }
+   }
+ }
+
+provider "aws"{
+   region = "ap-south-1"
+}
+
+
+#ec2/main.tf
+module "ec2"{
+  source = "./modules/create-ec2"
+  instance_count = 2				--> to override count from child module
+}
+
+#ec2/output.tf
+output "ip"{
+  value = module.ec2.public_ips			--> public_ips output in the create-ec2 module is a list of public IP addresses from the AWS instances.
+}							You can then reference this list in the root module as module.ec2.public_ips.
+
+
+------Writing custom terraform module and publish to registry------
+1. module must be on GitHuba and must be public repo
+2. Name of repo should be three part frmat like terraform-<PROVIDER>-name. name segment can have multiple highen like terraform-aws-mutli-ec2
+3. there should be release tag created in semantic versioning format ex: v1.0.0
+4. Once a tag is available in the repo, goto terraform registry and sign in with GitHub
+5. Regisry will automatically scan the repo with all the valid naming conventions and tags for publishing the modules. 
+
+git commands to tag:
+git tag -a v1.0.0 - m "frst tag"
+git push origin v1.0.0
+
 ---------------------------------------Funtions--------------------------------------------------
 Element function: retrieves a single element from list. 
 syntax: element(list,index)
@@ -577,6 +802,128 @@ resource "aws_instance" "web"{
   ami = "---"
   instance_type = "--"
 }
+
+
+-----------------------Terraform Imports------------------------------------------------
+used to import existing infra resource into your terraform state,allowing you to manage them as part of infra. 
+terraform import <RESOURCE_TYPE>.<RESOURCE_NAME> ADDRESS
+		 aws_instance    web		 unique identifier
+
+say, we have ec2 instance (web) running. 
+Before importing the resource, the root module should have the provider downloaded and the resource block with resource type being imported. 
+terraform {
+  required_providers{
+    aws {
+       source = "hashicorp/aws"
+       version = "5.22.0"
+       }
+  }
+
+provider "aws"{
+   region = var.region
+
+resource "aws_instance" "web"{
+}
+
+execute: terraform import aws_instance.web instance-id			--> it will import already running web instance into infra and update state file. 
+									 but config file will not be updated. 
+
+terraform state show aws_instance.web > ec2.tf				--> but not effective as it will have unsupported attributes which are not arguments
+
+
+-------------------------Terraform Taint----------------------------------
+taint is used to mark resource for recreation. untaint command removes the tainted status from resource, making it clean. the resurce will not be replaced during next tarrform apply
+
+terraform taint RESOURCE_TYPE.RESOURCE_NAME			--> depricated command
+terraform untaint RESOURCE_TYPE.RESOURCE_NAME
+
+terraform apply -replace=RESOURCE_TYPE.RESOURCE_NAME
+
+we can also taint resource insie module:
+terraform taint module.module_local_name.resource_name
+
+
+---------------------------------------Meta Arguments-------------------------------------
+Special argument that control how resources are created,updated and destroyed. They provide additional configuration options beyond regular resoruce specific arguments 
+Meta-argument can be used with resource and module block. 
+
+depends_on: 	Specify hidden dependancies
+module "vpc"{
+  source = "./modules/vpc"
+}
+
+module "eks"{
+  source = "./modules/eks"
+  depends_on = [module.vpc]
+}
+
+count:		By default terraform creates one resource per resource block. count multiple resource instances according to count
+for_each: 	create multiple resources according to map or set of strings. object has two attributes
+	each.key --> map key (or set member) corresponding to this instance
+	each.value --> map value corresponding to this instance. (if set then same as key)
+
+	variable "resource_types"{
+           type = map(string)
+           default = {
+              "master" = "t2.micro"
+              "web-01" = "t2.medium"
+              "web-02" = "t2.medium"
+             }
+          }
+         resource "aws_instance" "web"{
+            for_each = var.instance_types
+            ami = "ami-0912f71e06545ad88"
+            instance_type = each.value
+            tags = {
+              	Name = "k8s-${each.key}"
+                }
+            }
+
+provider: 	select non-deafult provider configuration 
+lifecycle: 	set lifecycle customization. include options like (bool value) create_before_destroy,prevent_destroy,ignore_changes,replace_triggered_by etc. its nested block inside respource. 
+ lifecycle{
+        create_before_destroy = true
+   }
+
+provisioner and connections:  take extra action after resource creation. (bootstrap script)
+
+
+--------------------------------Resource targeting-----------------------
+By Default terraform will apply entire plan at once. In some situation you may want to apply changes to specific resource or modules within your terraform config. this can be helpful for troublshooting issue or dealing with cases where terraform state becomes out of sync with actual resource. To support this terraform lets you target specific resources when you plan,apply and destroy infra. 
+
+terraform apply -target=resource_type.resource_names
+
+
+Note: The -target option is not explicitly designed for addressing drift; it's more for selectively applying changes to specific resources. If you're using it during a drift scenario, it's important to understand that it won't automatically resolve drift issues. 
+
+
+-----------------------------Dynamic block--------------------------------------
+Dynamic blocks provide a way to construct repetative nested blocks dynamically within a resource config. can be defined inside resource,data,provider and provisioner blocks. other ways to acheive same task through count,for_each 
+
+variable "inbound_ports"{
+  type = list(number)
+  default = [22,80,44]
+}
+
+resource "aws_security_group" "sg"{
+  name = "test_sg"
+  
+  dynamic "ingress"{
+     for_each = var.unbound_ports
+     content {
+        description = "allow traffic on ${iingress.value}"
+        from_port = ingress.value					--> here it should be dynamic block name.value not each.value
+        to_port = ingress.value
+        protocol = "tcp"
+        cidr_block = "0.0.0.0/0"
+        ipv6_cidr_block = "[::/0]"
+     }
+ }
+ tags = {
+    env = "prod"
+  }
+}
+        
 
 --------------Directories and Files-----------------
 1. File extention: code in terrform language is stored in .tf or .tf.json file extention. 
@@ -606,22 +953,6 @@ ami = "foo"
 # or //: single line comment 
 /* */ : multiline comment
 
----------Working with Resources---------
-Resource are the most important part of terraform lang. resource block describe infra objects like virtual network,
-compute instance, DNS records etc
-
-Resource Types:
-Providers: which are plugins for terraform that offer a collection of resource types
-Argument: which are specific to selected resource type
-documentation: which every provider uses to describe its resource types and arguments.
-
----------------Meta-Arguments-------------------
-depends_on: 	Specify hidden dependancies
-count:		count multiple resource instances according to count
-for_each: 	create multiple resources according to map or set of strings
-provider: 	select non-deafult provider configuration 
-lifecycle: 	set lifecycle customization
-provisioner and connections:  take extra action after resource creation. (bootstrap script)
 
 -----Operation timeouts--------------
 resource "aws_instance" "web"{
@@ -648,66 +979,6 @@ due to remote api limitations.
 3. in variable definitions like .tfvars or .tfvars.json file   (2nd priority)
 4. env variable like export TF_VAR_ followed by name of variable   (1st priority of variable to be loaded)
 
-
----------------------Modules----------------------------------
-1. root module -- you need at leas one rot module
-2. child module -- modules that are called by root module.
-3. published module -- module that are loaded from public or private registry.
-
---------calling a child module---------
-module "servers"{
-source = "./app_cluster"	--A root module that includes a module block is calling a child module. label(server) is
-servers = 5			used to refer to the module
-}
-
-4 module argument types:
-1. source argument is required for all modules.
-2. verson argument is reccom for modules from public registry.
-3. The input variable argument.
-4. The meta argument like for_each and depends_on
-
-example:						meta-arguments like
-module "consul"{					1. count
-source = "hashicorp/consul/aws"				2. for_each
-version = 0.0.5"					3. depends_on
-servers = 5						4. providers
-}
-
-----------module source------------------
-Module source tell terraform where to look for source code. terraform used the module source while module installaton
-step of terraform init
-There are 8 module source types:
-1. local paths				5. generic git 
-2. terraform registry			6. http urls
-3. github				7. S3 bucket
-4. bitbucket				8. GCS bucket
-
-module "consul"{
-source = "./consul"		--local module must start with ./ or ../
-}
-
-module "consul"{
-source = "hashicorp/consul/aws"		--public registry
-}
-
-module "consul"{
-source = "github.com/shantayya/example"		--github https url
-}
-
-module "consul"{
-source = "git@github.com:shantayya/example.git"		-- github ssh url
-}
-
-module "consul"{
-source = "https://example.com/vpc-module.zip"		-- fetching archives over http
-}
-
-----------------Expression and functions----------
-There are 7 types fo named values available in terraform
-1. Resources			5. Data sources
-2. input variables		6. filesystem and workspace info
-3. child modue outputs		7. Block-local values
-4. local values
 
 condition ? true_val : false_val		- conditional expression
 var.example ? 12 : "hello"
@@ -974,4 +1245,436 @@ resource "aws_instance" "web"{
 output "access_url"{
   value = "http://${aws_instance.web.public_ip}"
 }
+
+
+
+-------------creating AWS VPC using vpc module----------
+#vpc/variables.tf
+variable "region"{
+  default = "ap-south-1"
+ }
+
+variable "vpc_name"{
+  default = "my-vpc"
+}
+
+variable "cidr"{
+ default = "10.0.0.0/16"
+}
+
+variable "public_subnet"{
+ type = list(string)
+ default = ["10.0.1.0/24","10.0.2.0/24","10.0.3.0/24"]
+}
+
+variable "private_subnet"{
+ type = list(string)
+ default = ["10.0.101.0/24","10.0.102.0/24","10.0.103.0/24"]
+}
+
+#vpc/provider.tf
+terraform {
+  required_providers{
+    aws {
+       source = "hashicorp/aws"
+       version = "5.22.0"
+       }
+  }
+
+provider "aws"{
+   region = var.region
+}
+
+
+#vpc/main.tf
+module "vpc"{
+  source = "aws-modules-vpc/aws/vpc"
+  version = "5.1.2"
+  
+  name = var.vpc_name
+  azs = data.aws_availability_zones.available.names
+  private_subnet = var.private_subnet
+  public_subnet = var.public_subnet
+
+  enable_nat_gateway = true
+  single_nat_gateway = true
+  one_nat_gateway_per_az = false
+  map_public_ip_on_launch = true
+  
+  public_subnet_tags = {
+    subnet = "public"
+    "kubernetes.io/role/elb" = "1"
+  }
+
+  private_subnet_tags = {
+    subnet = "private"
+    "kubernetes.io/role/internal-elb" = "1"
+  }
+
+  tags = {
+    Env = "dev"
+   }
+}
+  
+  data "aws_availability_zones" "available"{
+    state = "available"
+  }
+
+
+#vpc/output.tf
+output "public_subnet_id"{
+  value = module.vpc.public_subnets
+}
+
+output "private_subnet_id"{
+ value = module.vpc.private_subnets
+ }
+
+output "igw"{
+  value = module.vpc.igw_id    
+}
+
+
+
+--------------------Create AWS EKS and VPC using terraform -------------------------
+#vpc.tf
+resource "aws_vpc" "my-vpc"{
+  name = "eks-vpc"
+  cidr_block = "10.0.0.0/16"
+  tags = {
+    Name = "eks-vpc"
+   }
+}
+
+resource "aws_internet_gateway" "igw"{
+  vpc_id = aws_vpc.my-vpc.id
+  tags = {
+    Name = "igw"
+  }
+}
+
+#subnet.tf
+resource "aws_subnet" "private_01"{
+  vpc_id = aws_vpc.my-vpc.id
+  cidr_block = "10.0.1.0/24"
+  tags = {
+    subnet = "private-01"
+    "kubernetes.io/role/internal-elb" = "1"
+   }
+}
+
+resource "aws_subnet" "private_02"{
+  vpc_id = aws_vpc.my-vpc.id
+  cidr_block = "10.0.2.0/24"
+  tags = {
+    subnet = "private-02"
+     "kubernetes.io/role/internal-elb" = "1"
+   }
+}
+
+resource "aws_subnet" "public_01"{
+  vpc_id = aws_vpc.my-vpc.id
+  cidr_block = "10.0.3.0/24"
+  tags = {
+    subnet = "public-01"
+     "kubernetes.io/role/elb" = "1"
+   }
+}
+
+resource "aws_subnet" "public_02"{
+  vpc_id = aws_vpc.my-vpc.id
+  cidr_block = "10.0.4.0/24"
+  tags = {
+    subnet = "public-02"
+     "kubernetes.io/role/elb" = "1"
+   }
+}
+
+#nat.tf
+resource "aws_eip" "eip"{
+  tags = {
+   Name = "eip"
+  }
+}
+
+resource "aws_nat_gateway" "nat_gw"{
+  allocation_id = aws_eip.eip.id
+  subnet_id = aws_subnet.public_01.id
+  tags = {
+    Name = "nat-gw"
+  }
+ depends_on = [aws_internet_gateway.igw]
+}
+
+
+
+#routes.tf
+resource "aws_routes_table" "public_rt"{
+ vpc_id = aws_vpc.my-vpc.id
+ route {
+    cidr_block = "0.0.0.0/24"
+    gateway_id = aws_internet_gateway.igw.id
+    }
+}
+
+resource "aws_routes_table" "private_rt"{
+ vpc_id = aws_vpc.my-vpc.id
+ route {
+    cidr_block = "0.0.0.0/24"
+    gateway_id = aws_nat_gateway.nat_gw.id
+    }
+}
+
+resource "aws_route_table_association" "public_subnet_01"{
+  subnet_id = aws_subnet_public_01.id
+  route_table_id = aws_route_table.public_rt.id
+}
+
+resource "aws_route_table_association" "public_subnet_02"{
+  subnet_id = aws_subnet_public_02.id
+  route_table_id = aws_route_table.public_rt.id
+}
+
+resource "aws_route_table_association" "private_subnet_01"{
+  subnet_id = aws_subnet_private_01.id
+  route_table_id = aws_route_table.private_rt.id
+}
+
+resource "aws_route_table_association" "private_subnet_02"{
+  subnet_id = aws_subnet_private_02.id
+  route_table_id = aws_route_table.private_rt.id
+}
+
+
+#cluster-role.tf
+resource "aws_iam_role" "cluster_role"{
+ name = "test-role"
+ assume_role_policy = jsonencode({
+    "Version": "2012-10-17"
+    "Statement": [
+        {
+          "Effect":"Allow",
+          "Principal":{
+             "Service": "eks.amazon.com"
+              },
+          "Action": "sts:AssumeRole"
+        }
+      ]
+     })
+
+ tags  = {
+    Name = "cluster-role"
+   }
+}
+
+resource "aws_iam_role_policy_attachment" "eks_managed_policy"{
+   role = aws_iam_role.cluster_role.name
+   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+}
+
+#eks_cluster.tf
+resource "aws_eks_cluster" "demo_cluster"{
+  name = var.cluster_name
+  role_arn = aws_iam_role.cluster_role.arn
+ 
+  vpc_config{
+    subnet_ids = [aws_subnet.private_01.id,aws_subnet.private_02.id,aws_subnet.public_01.id, aws_subnet.public_02.id]
+   }
+
+ depends_on = [aws_iam_role_polic_attachment.eks_managed_policy]
+ }
+
+output "endpoint"{
+  value = aws_eks_cluster.demo_cluster.endpoint
+ }
+
+
+#node_role.tf
+resource "aws_iam_role" "node_role"{
+ name = "node-role"
+ assume_role_policy = jsonencode({
+    "Version": "2012-10-17"
+    "Statement": [
+        {
+          "Effect":"Allow",
+          "Principal":{
+             "Service": "eks.amazonaws.com"
+              },
+          "Action": "sts:AssumeRole"
+        }
+      ]
+     })
+
+ tags  = {
+    Name = "node-role"
+   }
+}
+
+resource "aws_iam_role_policy_attachment" "eks_node_policy"{
+   role = aws_iam_role.node_role.name
+   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+}
+resource "aws_iam_role_policy_attachment" "eks_ecr_read_policy"{
+   role = aws_iam_role.node_role.name
+   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+resource "aws_iam_role_policy_attachment" "eks_cni_policy"{
+   role = aws_iam_role.node_role.name
+   policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+}
+
+#managed_nodegroup.tf
+resource "aws_eks_node_group" "managed_node_group" {
+  cluster_name    = aws_eks_cluster.demo_cluster.name
+  node_group_name = "managed_node_group"
+  node_role_arn   = aws_iam_role.node_role.arn
+  subnet_ids      = [aws_subnet.private_01.id,aws_subnet.private_02.id]
+
+  scaling_config {
+    desired_size = 2
+    max_size     = 5
+    min_size     = 2
+  }
+
+  update_config {
+    max_unavailable = 1
+  }
+
+  # Ensure that IAM Role permissions are created before and deleted after EKS Node Group handling.
+  # Otherwise, EKS will not be able to properly delete EC2 Instances and Elastic Network Interfaces.
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_node_policy,
+    aws_iam_role_policy_attachment.eks_ecr_read_policy,
+    aws_iam_role_policy_attachment.eks_cni_policy
+  ]
+}
+
+#variables.tf
+variable "region" {
+  default = "ap-south-1"
+}
+variable "cluster_name"{
+ default = "my-test-cluster"
+}
+
+#update-kubeconfig.tf
+resource "null_resource" "update_kubeconfig"{
+  depends_on = [aws_eks_cluster.demo_cluster]
+  provisioner "local-exec"{
+  command = "aws eks update-kubeconfig --region ${var.region} --name ${var.cluster_name}"
+  when = create
+  }
+}
+
+
+#deployment.yaml
+apiVersion: v1
+kind: Deployment
+metadata:
+  app: connected-city
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app : connected-city
+  template:
+    metadata:
+     labels:
+       app : connected-city
+    spec: 
+      containers:
+      - name: connected-city
+        image: shantayyaswami/connected-city:v1
+        ports:
+        - containerPort: 5000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  app: connected-city
+spec:
+  selector:
+    matchLabels:
+     app: connected-city
+  ports:
+  - protocol: tcp
+    port: 80
+    targetPort: 5000
+  type: LoadBalancer
+   
+
+-------------------------------------------Jenkins-Terraform intergation-------------------------------------
+
+1. create k8s cluster on digital ocean and downlaod kubeconfig file locally
+2. download helm and kubectl and set path 
+3. create jenkins-terraform user wth admin permissions and download AWS_ACCESS_KEY and AWS_SECRET_KEY
+4. install jenkins through helm chart
+helm repo add jenkins https://charts.jenkins.io
+helm repo update
+helm pull jenkins/jenkins --untar			
+
+helm upgrade --install jenkins jenkins/ 					--> you have to make below changes in values.yaml file and then execute
+or 
+helm upgrade --install jenkins jenkins/jenkins --set controller.servicePort=80 --set controller.serviceType=LoadBalancer		--> changing service type to loadbalancer so that jenkins can be directly accessible from outside cluster
+
+kubectl exec -it jenkins-0 -- bash
+cat /run/secrets/additional/chart-admin-password
+
+pipeline{
+  agent{
+    kubernetes{
+      defaultContainer 'terraform'	
+      yaml '''
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        labels:
+          name: IaC
+      spec:
+        containers:
+        - name: terraform
+          image: hashicorp/terraform
+          command:
+          - cat
+          tty: true
+        - name: SCM
+          image: git:alpine
+          command: 
+          - cat
+          tty: true
+       '''}
+     }
+   parameters{ choice(name: 'WORKFLOW',choices: ['apply','destroy'],description: 'Chose action')}
+    stages{
+        stage('Checkout SCM'){
+            steps{
+                container('git'){
+                    sh 'git clone URL'
+                              }
+                   }
+                }
+         stage('Terrafrom init'){
+             steps{
+                 container('terraform'){
+                    	withCredentials([usernamePassword(credentialsId:'terraform', passwordVariable:'AWS_ACCESS_KEY', userVariable:'AWS_SECRET_KEY')]){
+					sh 'terraform init'
+				}
+                             }
+                    }
+              }
+	  stage('Terrafrom ${WORKFLOW}'){
+             steps{
+                 container('terraform'){
+                    	withCredentials([usernamePassword(credentialsId:'terraform', passwordVariable:'AWS_ACCESS_KEY', userVariable:'AWS_SECRET_KEY')]){
+					sh 'terraform ${WORKFLOW} -auto-approve'
+				}
+                             }
+                    }
+              }
+         }
+  }
+
+Note: make sure that remote backend is created. 
+
+will above integration work?
 
