@@ -1,3 +1,4 @@
+v1.7
 Infrastructure as Code(IaC) is the process of provisioning,configuring and managing infra like vm,db,n/w,lb etc through code and automation rather than manual process. 
 There are 2 common approaches:
 1. Declarative IaC: describes desired end state of infra and IaC tool figure out how to achieve it. Focus on what infra look like rather than specifying steps to get there. (ex: Terraform,CloudFormation, Azure Resource Manager template) 
@@ -12,26 +13,26 @@ These 2 categories are mutually exclusive , as most configuration management too
 
 Mutable vs Immutable infra:
 Mutable infra: Infra can be modified or updated once its provisioned makes version tracking much more difficult.
-Immutable infra: cannot be modified once provisioned. Involves provisioning new infra if existing infra must be changed. it eliminates configuration drift(changes to infra occurs over time that are not recorded), easy to version control. 
+Immutable infra: cannot be modified once provisioned. Involves provisioning new infra if existing infra get changed. it eliminates configuration drift(changes to infra occurs over time that are not recorded), easy to version control. 
 
-Idempotence: No matter how many times you run IaC, your end up with same end state. If the desired end state is already achieved then system will not change any configuration even after running the IaC code again. 
+Idempotence: No matter how many times you run IaC, you are end up with same end state. If the desired end state is already achieved then system will not change any configuration even after running the IaC code again. 
 
 
 ---------Terraform--------------
-Terraform is HashiCorp's infra as tool. Lets you define infra in human readable,declarative configuration files and manage your infra lifecycle. written in HCL. Terraform use the cloud provider APIs to provision infra.(cloud agnnostic)
+Terraform is HashiCorp's infra as tool. Lets you define infra in human readable,declarative configuration files and manage your infra lifecycle. written in HCL. Terraform use the cloud provider APIs to provision infra.(cloud agnostic)
 
 --providers--
-Terraform relies on plugins called providers to interact with cloud providers like aws,azure,gcp,saas providers etc. Terraform config must declare whcih provider they want so that terraform can install and use them. Additionally, some providers require additional config like credentials,versions,endpoint URL's,region details before they can be used.  
+Terraform relies on plugins called providers to interact with cloud providers like aws,azure,gcp,saas providers etc. Terraform config must declare which provider they want so that terraform can install and use them. Additionally, some providers require additional config like credentials,versions,endpoint URL's,region details before they can be used.  
  
 Terraform workflow:
 Write ---------------------------------> Plan------------------------------------- --> Apply
-(define infra in config files. 		Dry run to preview changes before applying.	On Approval terraform provision infra from config files. 
+define infra in config files. 		Dry run to preview changes before applying.	On Approval terraform provision infra from config files. 
 
 
 Terraform structure:
 project-root/
 |-- main.tf			--> contains main config of infra like definition of resouces(ec2,vpc,db etc)
-|-- variables.tf		--> declare input variables for your terraform. parametrized your code. 
+|-- variables.tf		--> declare input variables for your terraform. parameterized your code. 
 |-- outputs.tf			--> display info about deployed infra
 |-- terraform.tfvars		--> used to set specific values for the variables declared in variables.tf
 |-- providers.tf		--> define providers and their config
@@ -44,18 +45,18 @@ project-root/
 |       |-- main.tf
 |       |-- variables.tf
 |       |-- outputs.tf
-|-- .terraform/			--> directory contains the local Terraform state and other Terraform-related files.
+|-- .terraform/			--> directory contains the local Terraform state and other Terraform-related files (provider installation, modules etc)
 |-- terraform.tfstate		--> contains the current state of your infrastructure. It is managed by Terraform and should not be modified manually.
-|-- terraform.tfstate.backup	--> Backup of the state file and is automatically created by Terraform.
+|-- terraform.tfstate.backup	--> Backup of the state file and is automatically created by Terraform when execute destroy command. 
 	
 
-1. Terraform block: Specifies the required providers that terraform should download before exicuting the terraform script. block contains source(from where terraform should download provider) and its version
+1. Terraform block: Specifies the required providers that terraform should download before executing the terraform script. block contains source(from where terraform should download provider) and its version
 
 terraform {				--> If we miss to include terraform block then based on the provider terraform install required provider
   required_providers{
-   aws{
+   aws={
        source =  "hashicorp/aws"
-       version = "5.22.0"
+       version = "5.30.0"
      }
    }
 }
@@ -83,6 +84,7 @@ resource "aws_instance" "web" {
    description = " Name fo s3 bucket"
    type = string
    default = "my-terraform-bucket"
+   sensitive = true			--> optional
  }
 
 5. Output Block: makes information about infra available on CLI
@@ -96,14 +98,26 @@ output "ec2_ip" {
 }
 
 
-6. Data block: Its similar to resource black however it does not create or manages the resource rather it fetches info about existing infra objects. 
+6. Data block: Its similar to resource block however it does not create or manages the resource rather it fetches info about existing infra objects, query external systems,API or other sources of data. 
+ 
 data "aws_instance" "my_ec2" {
   depends_on = [aws_instance.web]
   id = aws_instance.web.id
  }
   
-7. Module block:
-8. Local Values block: 
+7. Module block: module block is used to call and instantiate modules.They allow you to organize your infrastructure code into reusable components, making it easier to manage and maintain complex infrastructure setups.
+module "module_name" {
+  source = "module/path"
+  # other module configuration variables
+}
+
+
+8. Local Values block: locals block allows you to define values that are calculated or derived within your configuration.help simplify expressions, make configurations more readable, or avoid repeating complex calculations. 
+locals {
+  local_name = expression
+  # other local values
+}
+
 
 
 Terraform state: its JSON file that stores info about resources that terraform manages as well as their current state and dependancies. This file keeps track of remote state of infra created by config and maps them to real world resource. Terraform uses state file to decide changes that need to be made when new config is applied. 
@@ -125,14 +139,14 @@ cidr_block = var.base_cidr_block
 
 
 Argument vs attributes referrence
-Arguments are defined as input variables iin resource or module's configuration. Where as attribute is used to retrieve info from resource that has already been created. it represents output of resource. 
+Arguments are defined as input variables in resource or module's configuration. Where as attribute is used to retrieve info from resource that has already been created. it represents output of resource. 
 
 
 -------------------Terraform CLI commands-------------------------
-terraform version: find the terraform version
+terraform version: find the terraform version				--> Terraform v1.7.1 latest
 terraform -chdir=<path> <subcommand> : swicth to working directory
 
-terraform init : initialize the directory for terraform configuration. mainly download required provider,modules any if referrenced in config  and install them locally to use them execute tf scripts --> creates lock file(terraform.locl.hcl) which records exact version of providers and modules installed --> creates .terraform dir where it installs providers and modules. 
+terraform init : initialize the working directory for terraform configuration. mainly download required provider,modules any if referrenced in config  and install them locally to use them execute tf scripts --> creates lock file(terraform.lock.hcl) which records exact version of providers and modules installed --> creates .terraform dir where it installs providers and modules. 
 
 terraform fmt : format the indentation of tf script.
 terraform validate: validates the syntax 
@@ -156,14 +170,14 @@ terraform providers: get providers info used in configuration
 
 
 ----Provider version contraints----- 
-Used to set the accpetable range of versions for provider or module. If version is not specified then terraform downloads latest version 
+Used to set the acceptable range of versions for provider or module. If version is not specified then terraform downloads latest version 
 Specify range of versions using various operators:
 1. != excludes an exact version number
 2. >=,<=,>,< greater,lower than equal to specified version
 3. ~> only the rightmost version number(patch) to increase. (ex: 5.13.1  --> allowed 5.13.2 not 5.13.0)
 
 manage terraform version:
-Set the required_version = to control the version of terraform  that your config use and make updates more predictable. Avoid usiing floating versions ~>, which can lead to unexpected update. Version locking helps you to maintain consistency and predictability in your infra. 
+Set the required_version = to control the version of terraform  that your config use and make updates more predictable. Avoid using floating versions ~>, which can lead to unexpected update. Version locking helps you to maintain consistency and predictability in your infra. 
 
 -----Multiple provider configuration -----------
 Primary reason for this is to support multiple regions for cloud platform. use alias meta-argument segament to provide an extra name segment. 
@@ -171,9 +185,9 @@ use <PROVIDER NAME>.alias for using it.
 
 terraform {
  required_providers{
-  aws {
+  aws = {
     source = "hashicorp/aws"
-    version = "5.22.0"
+    version = "5.30.0"
    }
 }
 
@@ -212,7 +226,7 @@ resource "local_sensitive_file" "password"{
 
 ----Random provider------ 
 The random provider allows the use of randomness within terraform configuration. This is terraform logical provider, works entirely within terraforms logic and does not interact with any other resource. 
-(random_id, random_integer, random_pet, random_shuffle, random_string, random_uuid). ex: random_pet genrates random pet names which can be used as unique identifier with other resources. 
+(random_id, random_integer, random_pet, random_shuffle, random_string, random_uuid). ex: random_pet generates random pet names which can be used as unique identifier with other resources. 
 
 resource "random_pet" "serverName" {
   length = 3
@@ -238,12 +252,12 @@ description, type, default, sensitive (does not display but records in state fil
 
 Data Types allowed:
 string					list,object
-number					set,tuple
+number					set (declared using [] only),tuple
 bool					map
 
 declaration:
 variable "image_id"{
-type = string
+type = string				--> default type takes if not declared. 
 }
 
 variable "availability_zone_names"{
@@ -255,7 +269,7 @@ variable "docker_ports"{
 type = list(object({
 internal = number
 external = number
-protocol = string)})
+protocol = string}))
 
 default = [ {
 internal = 8300
@@ -299,7 +313,7 @@ Precedence:
 2. *.auto.tfvars
 3. terraform.tfvars.json
 4. terraform.tfvars
-5. Env variables
+5. Env variables 
 
 ---Local variables----
 like temp local variable defined within functions of pgrm language. set of local values can be declared together in local block and can be called using local.<NAME>
@@ -310,7 +324,7 @@ you can also define in separate file called locals.tf
 they are like return values in prgm langauge and have many uses
 1. child module can use them to expose subset of resource attributes to the parent module.
 2. Root module can use them to print values in CLI.
-3. Root module output can be accessed by other configurations via terraform-remote_state data source. 
+3. Root module output can be accessed by other configurations via terraform_remote_state data source. 
 
 can be declared using output block and file called output.tf
 ex: 
@@ -362,7 +376,8 @@ aws_security_group_rule.local_access
 
 
 ------------------------------------Data Sources-----------------------------------------------
-In Terraform data sources are used to retrieve info from external sources and make it available for use in your infra code. Data sources are defined using data block
+In Terraform data sources are used to retrieve info from external sources and make it available for use in your infra code. Data sources are defined using data block.  data sources are read-only, and they do not create or modify resources. 
+
 data "data_source_type" "data_source_name" {
  agrument = value 
 }
@@ -417,7 +432,7 @@ output "filtered_ami"{
 
 
 ------------------------------------Terraform provisioners---------------------------------------------------
-Provisioners are used to execute script or actions on remote resources once they created. Provisioners are allow to perform configuration maagement tasks like installing software,running scripts etc
+Provisioners are used to execute script or actions on remote resources once they created. Provisioners are allow to perform configuration management tasks like installing software,running scripts etc
 But provisioners are used as Last resort because they introduce complexity and uncertainty to terraform workflows as terraform runs the script but does not know what script does. 
 Supports several types of provisioners:
 1. File provisioners: Used to copy files or dir to newly created resource. require one or more connection block to access remote resource. 
@@ -438,12 +453,12 @@ resource "aws_instance" "web"{
   }
 }
 
-Note: connection block can be nested within either resource (affects all resource provisioners) or provisioner (affects only this provisioner) block
+Note: connection block can be nested within either resource (afects all resource provisioners) or provisioner (affects only this provisioner) block
 
 2. Local Exec provisioners: run scripts or commands on machine where Terraform is executed after resource is created. ex: running an ansible playbook
 Failure Behavior:
 by default, provisioners that wil fail also cause Terraform apply itself to fail. on_failure setting can be used to change this behaviour. 
-coontiue: makes terraform to ignore and continue
+continue: makes terraform to ignore and continue
 fail: terraform will raise an error and stop applying. 
 
 Creation time provisioners: only run during creation, not during update or any other lifecycle. if fails then resource is marked as tainted. tainted resource will be planned for destruction and recreation upon the next apply.  
@@ -459,7 +474,7 @@ Null Resource: resource type that does not directly manage any infra. used for r
 
 resource "null_resource" "example"{
   triggers = {					--> triger block used to specify set of values that when changed will cause the null resource to be recreated. 
-      timestamp = "$"{timestamp()}"
+      timestamp = "${timestamp()}"
     }
   provisioner "local-exec" {
     command = "echo 'hello world'"
@@ -512,10 +527,19 @@ terraform state replace-provider <old_provider> <new_provider> 			--> change the
 
 ----Detecting and managing drift-----
 Drift is the term for when the real-world state of your infra differes from the state defined in your config. drift can be introduced manually or any automation tool
-so Terraform cannot detect drift of resources
+so Terraform does not have built in mechanism to detect drift automatically. it detects it when execute terrafrom plan.
 
 Refresh-only mode:
 terraform refresh (depricated)--> used to reconcile real world resources in your infra with terraform state. Its primarily used when you suspect that state has drifted out of sync with actual resources in infra. 
+
+Note: When you run terraform refresh, Terraform fetches the current state of resources in your infrastructure and updates its state file to reflect any changes or drift that may have occurred outside of Terraform's knowledge. so to manage drift, you need apply changes again. 
+There isn't a built-in feature to completely prevent manual updates or deletions of resources. However,  some practices and strategies you can employ to minimize the likelihood of manual changes outside of Terraform:
+1. Access control
+2. Logging and auditing		(aws config --> lambda gets triggered --> send sns notification to employee)
+3. Documentatin and training
+4. communication and collaboration
+
+Terraform has limited built-in mechanisms for handling drift. Drift detection primarily involves running terraform plan to compare the current state with the configured state. However, it doesn't automatically correct drift. Handling drift often involves manual intervention or custom scripting.
 
 terraform plan -refresh-only or terraform apply -refresh-only
 
@@ -534,9 +558,9 @@ Terraform will store the state within S3 and DynamoDB is used for state locking 
 
 terraform {
   required_providers{
-    aws {
+    aws={
        source = "hashicorp/aws"
-       version = "5.22.0"
+       version = "5.30.0"
        }
     }
 }
@@ -545,7 +569,7 @@ provider "aws"{
   region = "ap-south-1"
  }
 
-backend "s3"{						--> can also be created using terraform		resource "aws_s3_bucket" "statefile_bucket"{
+backend "s3"{						--> can also be created using terraform			resource "aws_s3_bucket" "statefile_bucket"{
   bucket  = "statefile-2023"	or aws_s3_bucket.statefile_bucket						bucket = "statefile-2023"
   region = "ap-south-1"												
   key = "terraform.tfstate"											}
@@ -577,7 +601,7 @@ terraform workspace delete <name>			--> delete workspace. (should be in differen
 #provider.tf
 terraform {
   required_providers{
-    aws{
+    aws={
         source = "hashicorp/aws"
         version = "5.22.0"
       }
@@ -637,7 +661,7 @@ output "instance_ip"{
 -------------------------------------------Modules----------------------------------
 Terraform modules are powerful feature that helps in writing modular, maintainable and reusable infra code, making infra management more efficient and scalable. 
 you can define set of resources, configurations, and variables within modules and then reuse that module in multiple terraform configurations. 
-you can find prebuilt modules in terraform registry.
+you can find prebuilt modules in terraform registry. allow you to organize your infrastructure code into reusable components
 
 
 1. root module -- Every Terraform confguration has atleast one module, known as rot module, which consist of resources in .tf files in the main working directory. 
@@ -688,7 +712,7 @@ version = 0.0.5"					3. depends_on
 }
 
 Module Source:
-Module source tell terraform where to look for source code. terraform used the module source while module installaton
+Module source tell terraform where to look for source code. terraform use the module source while module installation
 step of terraform init
 There are 8 module source types:
 1. local paths				5. generic git 
@@ -718,7 +742,7 @@ source = "https://example.com/vpc-module.zip"		-- fetching archives over http
 
 
 Accessing module output values:
-module.child_module_local_name.output_local_name			--> module.networking.instance_ip(for single ip) module.networking.public_ips (list)
+module.child_module_local_name.output_local_name			--> module.local_name.instance_ip(for single ip) 
 
 
 #ec2/modules/create-ec2/main.tf
@@ -777,7 +801,7 @@ output "ip"{
 
 
 ------Writing custom terraform module and publish to registry------
-1. module must be on GitHuba and must be public repo
+1. module must be on GitHub and must be public repo
 2. Name of repo should be three part frmat like terraform-<PROVIDER>-name. name segment can have multiple highen like terraform-aws-mutli-ec2
 3. there should be release tag created in semantic versioning format ex: v1.0.0
 4. Once a tag is available in the repo, goto terraform registry and sign in with GitHub
@@ -791,10 +815,27 @@ git push origin v1.0.0
 Element function: retrieves a single element from list. 
 syntax: element(list,index)
 
+lookup(): used to retrieve the value of a specified key from a map or a list of maps.
+lookup(map, key, [default])
+
+variable "instance_type"{
+  type = map(string)
+  default = {
+   "dev" = "t2.micro"
+   "stage" = "t2.medium"
+   "prod" = "t2.xlarge"
+  }
+}
+
+resource "aws_instance" "ec2"{
+  ami = "--"
+  instance_type = lookup(var.instance_type,terraform.workspace)
+}
+
 file function: reads the content of file at given path and returns them as string. 
 resource "aws_key_pair" "demo"{
   key_name = "ansible"
-  public_ey = file("demo_key.pub")
+  public_key = file("demo_key.pub")
 }
 
 resource "aws_instance" "web"{
@@ -810,12 +851,12 @@ terraform import <RESOURCE_TYPE>.<RESOURCE_NAME> ADDRESS
 		 aws_instance    web		 unique identifier
 
 say, we have ec2 instance (web) running. 
-Before importing the resource, the root module should have the provider downloaded and the resource block with resource type being imported. 
+Before importing the resource, the root module should have the provider downloaded and the empty resource block with resource type that is being imported. 
 terraform {
   required_providers{
-    aws {
+    aws = {
        source = "hashicorp/aws"
-       version = "5.22.0"
+       version = "5.30.0"
        }
   }
 
@@ -839,12 +880,12 @@ terraform untaint RESOURCE_TYPE.RESOURCE_NAME
 
 terraform apply -replace=RESOURCE_TYPE.RESOURCE_NAME
 
-we can also taint resource insie module:
+we can also taint resource inside module:
 terraform taint module.module_local_name.resource_name
 
 
 ---------------------------------------Meta Arguments-------------------------------------
-Special argument that control how resources are created,updated and destroyed. They provide additional configuration options beyond regular resoruce specific arguments 
+It change the default behavior of terraform configuration. Special argument that control how resources are created,updated and destroyed. They provide additional configuration options beyond regular resource specific arguments 
 Meta-argument can be used with resource and module block. 
 
 depends_on: 	Specify hidden dependancies
@@ -857,7 +898,31 @@ module "eks"{
   depends_on = [module.vpc]
 }
 
-count:		By default terraform creates one resource per resource block. count multiple resource instances according to count
+count:		By default terraform creates one resource per resource block. count argument creates multiple resource instances according to count number
+limitation of count meta-argument:
+1. Limited dynamic behavior: The count value is evaluated during the planning phase and must be known before applying the configuration.If you need dynamic scaling (e.g., adjusting the count based on runtime conditions)
+# This is not allowed
+resource "example" "example_resource" {
+  count = var.create_resources_condition ? 1 : 0				--> runtime evaluation
+}
+
+2. Unintended changes based on ordering: When using count, the resource instances are identified by an index. Modifying an element anywhere in between the list causes unintended changes for all subsequent elements.
+locals {
+  server_names = ["backend-service-a", "backend-service-a1", "backend-service-b", "backend-service-c"]
+}
+
+resource "aws_instance" "backend_server" {
+  ami       	= "ami-07355fe79b493752d"
+  instance_type = "t2.micro"
+  count     	= length(local.server_names)
+  tags = {
+	Name = local.server_names[count.index]
+  }
+}
+
+Plan: 1 to add,2 to change, 0 to destroy
+
+
 for_each: 	create multiple resources according to map or set of strings. object has two attributes
 	each.key --> map key (or set member) corresponding to this instance
 	each.value --> map value corresponding to this instance. (if set then same as key)
@@ -879,8 +944,10 @@ for_each: 	create multiple resources according to map or set of strings. object 
                 }
             }
 
+for_each vs count: When should you opt for for_each instead of count? If your resource instances aren’t identical, choosing the for_each meta-argument is preferable, as it grants greater control over how objects change
+
 provider: 	select non-deafult provider configuration 
-lifecycle: 	set lifecycle customization. include options like (bool value) create_before_destroy,prevent_destroy,ignore_changes,replace_triggered_by etc. its nested block inside respource. 
+lifecycle: 	set lifecycle customization. include options like (bool value) create_before_destroy,prevent_destroy,ignore_changes,replace_triggered_by etc. its nested block inside resource. 
  lifecycle{
         create_before_destroy = true
    }
@@ -898,7 +965,7 @@ Note: The -target option is not explicitly designed for addressing drift; it's m
 
 
 -----------------------------Dynamic block--------------------------------------
-Dynamic blocks provide a way to construct repetative nested blocks dynamically within a resource config. can be defined inside resource,data,provider and provisioner blocks. other ways to acheive same task through count,for_each 
+Dynamic blocks provide a way to construct repeatative nested blocks dynamically within a resource config. can be defined inside resource,data,provider and provisioner blocks. other ways to acheive same task through count,for_each 
 
 variable "inbound_ports"{
   type = list(number)
@@ -911,7 +978,7 @@ resource "aws_security_group" "sg"{
   dynamic "ingress"{
      for_each = var.unbound_ports
      content {
-        description = "allow traffic on ${iingress.value}"
+        description = "allow traffic on ${ingress.value}"
         from_port = ingress.value					--> here it should be dynamic block name.value not each.value
         to_port = ingress.value
         protocol = "tcp"
@@ -924,6 +991,32 @@ resource "aws_security_group" "sg"{
   }
 }
         
+----same using for_each---
+variable "inbound_ports" {
+  type    = list(number)
+  default = [22, 80, 443]
+}
+
+resource "aws_security_group" "sg" {
+  name = "test_sg"
+
+  ingress = {
+    for_each = { for port in var.inbound_ports : port => {
+      description     = "allow traffic on ${port}"
+      from_port        = port
+      to_port          = port
+      protocol         = "tcp"
+      cidr_blocks      = ["0.0.0.0/0"]
+      ipv6_cidr_blocks = ["::/0"]
+    } }
+  }
+
+  tags = {
+    env = "prod"
+  }
+}
+
+
 
 --------------Directories and Files-----------------
 1. File extention: code in terrform language is stored in .tf or .tf.json file extention. 
@@ -1179,7 +1272,7 @@ resource "aws_instance" "web"{
     Name = "WebServer"
    }
   
-#  provisioner "local-exec" {					--> local-exec provisioner will execute every time new instance created but what if instance already       #	command = "echo ${self.public_ip} >> ./hosts"			created? create null resource and execute loca provisioner then 
+#  provisioner "local-exec" {					--> local-exec provisioner will execute every time new instance created but what if instance already       #	command = "echo ${self.public_ip} >> ./hosts"			created? create null resource and execute local provisioner then 
   }	
 }
 
@@ -1426,22 +1519,22 @@ resource "aws_routes_table" "private_rt"{
 }
 
 resource "aws_route_table_association" "public_subnet_01"{
-  subnet_id = aws_subnet_public_01.id
+  subnet_id = aws_subnet.public_01.id
   route_table_id = aws_route_table.public_rt.id
 }
 
 resource "aws_route_table_association" "public_subnet_02"{
-  subnet_id = aws_subnet_public_02.id
+  subnet_id = aws_subnet.public_02.id
   route_table_id = aws_route_table.public_rt.id
 }
 
 resource "aws_route_table_association" "private_subnet_01"{
-  subnet_id = aws_subnet_private_01.id
+  subnet_id = aws_subnet.private_01.id
   route_table_id = aws_route_table.private_rt.id
 }
 
 resource "aws_route_table_association" "private_subnet_02"{
-  subnet_id = aws_subnet_private_02.id
+  subnet_id = aws_subnet.private_02.id
   route_table_id = aws_route_table.private_rt.id
 }
 
@@ -1455,7 +1548,7 @@ resource "aws_iam_role" "cluster_role"{
         {
           "Effect":"Allow",
           "Principal":{
-             "Service": "eks.amazon.com"
+             "Service": "eks.amazonaws.com"
               },
           "Action": "sts:AssumeRole"
         }
@@ -1676,5 +1769,137 @@ pipeline{
 
 Note: make sure that remote backend is created. 
 
-will above integration work?
+https://github.com/periwinkleFTW/terraform-path-to-cert/blob/master/practice-pt-3/main.tf
+
+
+
+---------------------------------Terraform Interview Questions---------------------
+1. What if someone deleted terraform.tfstate file?
+If the Terraform state file (terraform.tfstate) is accidentally deleted, it can lead to potential issues as Terraform loses track of the existing infrastructure. When you run terraform apply without a state file, it will indeed try to create new instances, potentially resulting in duplication and other issues.
+
+To recover from a deleted state file, you have a few options:
+1. Recreate the State File: from backup if available
+2. Import existing resources: If you cannot recover the original state file, you can use the terraform import command to re-import the existing resources into a new state file. This involves manually associating each resource with its corresponding Terraform configuration. if infra is large then takes time. 
+3. Terraform Workspace with New State:
+	1. Create a New Workspace and Infrastructure from old workspace config file
+	2. Copying State to the Old Workspace:
+	3. Deleting New Workspace's Infrastructure:
+	it may incur cost. 
+
+2. Featurs:
+Terraform has several features that contribute to its popularity and differentiate it from other Infrastructure as Code (IaC) tools in the market.
+1. Declarative Syntax: human readable format.
+Terraform uses a declarative syntax(HCL language), allowing users to define the desired state of their infrastructure without specifying the step-by-step procedures to achieve that state. 
+2. Cloud Agnostic
+3. Execution plans (dry run)
+4. State Management:
+Terraform maintains a state file that keeps track of the current state of the infrastructure. 
+5. Modules:
+Modules allow users to encapsulate and reuse pieces of infrastructure code, promoting code organization and reusability.
+6. Idempotency
+
+
+3. How do you preserve keys in terraform?
+I know few options of aws key preservation as worked on aws as provider.
+1. Terraform Variables:
+variable "aws_access_key" {
+  type    = string
+  sensitive = true
+}
+
+variable "aws_secret_key" {
+  type    = string
+  sensitive = true
+}
+2. AWS Profile in Provider Configuration: Use AWS named profiles and reference them in your provider configuration. This way, you can manage AWS credentials outside of your Terraform configuration.
+provider "aws" {
+  region = "us-west-2"
+  profile = "myprofile"
+}
+
+3. Environment Variables:
+export AWS_ACCESS_KEY_ID="your-access-key-id"
+export AWS_SECRET_ACCESS_KEY="your-secret-access-key"
+provider "aws" {
+  region = "us-west-2"
+}
+
+4. Terraform Backend Configuration: If you are using remote state with a backend that supports variables, consider configuring the backend to accept sensitive values like access keys as variables.
+terraform {
+  backend "s3" {
+    bucket         = "my-terraform-state-bucket"
+    key            = "terraform.tfstate"
+    region         = "us-west-2"
+    encrypt        = true
+    access_key     = var.aws_access_key
+    secret_key     = var.aws_secret_key
+  }
+}
+
+if we dont want to store sensitive info locally in configuration file then we can use 
+Data Sources or Dynamic Lookups:
+data "aws_secretsmanager_secret_version" "my_secret" {
+  secret_id = "arn:aws:secretsmanager:us-west-2:123456789012:secret:my-secret-xyz"
+}
+
+provider "aws" {
+  region     = "us-west-2"
+  access_key = data.aws_secretsmanager_secret_version.my_secret.secret_string
+  secret_key = data.aws_secretsmanager_secret_version.my_secret.secret_string
+}
+
+
+5. what are the drawbacks of terarform which you find while wokrng on it?
+1. confined to single langauge HCL. while in other IaC tools like pulumi we can use python for provisoning infra
+2. There is no in-build drift handling mechanism in terraform
+3. I can see in lifecycle meta argument there is one option like prevent_delete but we dont have prevent_update kind of option which might have used to handle drift
+4. Limited Parallelism for Some Operations: like AWS ELB
+5. External Tooling for Sensitive Data: more advanced secrets management might require external tools or services like HashiCorp Vault.
+
+6. explain core terraform end-end workflow ?
+1. write
+2. init
+3. fmt + validate
+4. plan
+5. apply 
+6. destroy
+	
+7. who creates terraform.tfstate.backup file an uder which scenario its created?
+terraform automatically creates it, when terraform destroy command in executed. 
+
+8. recently migrated state file to aws s3, now post terraform configuration change I dont see any .tfstate.backup file getting created locally or remotely 
+tfstate.backup fil gets created when state files are stored locally. To have the state files backed up while storing in s3 versioning needs to be enabled at storage account level . 
+
+9. challenges you faced while working on terraform?
+1. terraform will not track actions executed through user_data or provisioners so use idempotent options like Ansible to perform config management
+1. state management (we had been using remote backend but lock was not introduced earlier) terraform cloud build in state locking mechanism.
+2. drift management (resources were manually changing configurations) we implemented cron job with terraform refresh command which can intimate us if any drift introduced. we also had configured a lambda which can check audit logs and trigger a notification to use if env was changed manually but not by terraform. terraform enterprise provides drift detection feature (Sentinel, policy as code to define policies to enforce rules and constraint on infra)
+3. credential management (even using sensitive argument in variable block was logging credentials in state file) so we decided use aws secret manager
+4. resource must have good networking understanding to provision infra otherwise when you execute terraform plan it will not show any error rather due to dependancy terraform apply will throw error with provisioning of few resource objects and few failed.  
+
+
+10. What if you encounter a serious error ad want to rollback terraform infra?you can implement a rollback strategy using the following general steps:
+Version Control:
+Maintain your Terraform configurations in version control (e.g., Git). This includes both the Terraform code and the state file.
+
+Tagging Releases:
+Tag significant releases in your version control system. This allows you to easily refer back to a specific state of the Terraform configurations.
+
+Backup State:
+Before making changes, always back up your Terraform state. This can be done by copying or storing the state file in a safe location.
+
+Destroy and Apply:
+If you encounter a serious error and need to rollback, you can run terraform destroy to tear down the existing infrastructure. After that, you can check out the specific version of your Terraform code from version control and run terraform apply to recreate the infrastructure
+
+
+11. Can you tell me some terraform best practices?
+1. always prefer remote backend for effective collaboration
+2. always use terraform validate command to use terraform fail fast mechanism 
+3. use version control system for configuration and state files
+4. implement drift detection system to avoid issues
+5. always provide least privilage for users for provisioning infra
+6. always use secret manageer or voult to manage credentials. if we use terraform env variable which logs credentials in state file
+7. use modularization 
+8. automate terraform deployment and testing using CI/CD
+9. segregate terraform config as per env using workspace feature. 
 
