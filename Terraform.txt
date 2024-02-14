@@ -1,4 +1,4 @@
-v1.7
+workv1.7
 Infrastructure as Code(IaC) is the process of provisioning,configuring and managing infra like vm,db,n/w,lb etc through code and automation rather than manual process. 
 There are 2 common approaches:
 1. Declarative IaC: describes desired end state of infra and IaC tool figure out how to achieve it. Focus on what infra look like rather than specifying steps to get there. (ex: Terraform,CloudFormation, Azure Resource Manager template) 
@@ -153,7 +153,7 @@ terraform validate: validates the syntax
 terraform plan: create an execution plan (dry run)
 
 terraform apply: when you run apply, terraform always run plan first then get the prompt to accept changes. once appoved then provision infra by applying changes. 
-use -auto-approve to skip prompt (useful in CI/CD pipeline) --> updates state file to reflect new infra chnages + display output if output block defined. 
+use -auto-approve to skip prompt (useful in CI/CD pipeline) --> updates state file to reflect new infra changes + display output if output block defined. 
 
 terraform destroy: destroy the created infra. 1st taraform locks project state (so that no other instance of terraform modify or apply changes to terraform resource) --> create plan to destroy resource and wait for approval --> once approved, destroy --> state file wil be updated with new state of resource
 
@@ -664,7 +664,7 @@ you can define set of resources, configurations, and variables within modules an
 you can find prebuilt modules in terraform registry. allow you to organize your infrastructure code into reusable components
 
 
-1. root module -- Every Terraform confguration has atleast one module, known as rot module, which consist of resources in .tf files in the main working directory. 
+1. root module -- Every Terraform confguration has atleast one module, known as root module, which consist of resources in .tf files in the main working directory. 
 2. child module -- modules that are called by root module.
 3. published module -- module that are loaded from public or private registry. (Terraform registry or GitHub)
 
@@ -808,10 +808,11 @@ output "ip"{
 5. Regisry will automatically scan the repo with all the valid naming conventions and tags for publishing the modules. 
 
 git commands to tag:
-git tag -a v1.0.0 - m "frst tag"
+git tag -a v1.0.0 -m "frst tag"
 git push origin v1.0.0
 
 ---------------------------------------Funtions--------------------------------------------------
+Function in terraform is a built-in operation that manipulates data or performs computations to dynamically generate configuration values
 Element function: retrieves a single element from list. 
 syntax: element(list,index)
 
@@ -969,7 +970,7 @@ Dynamic blocks provide a way to construct repeatative nested blocks dynamically 
 
 variable "inbound_ports"{
   type = list(number)
-  default = [22,80,44]
+  default = [22,80,443]
 }
 
 resource "aws_security_group" "sg"{
@@ -1008,8 +1009,9 @@ resource "aws_security_group" "sg" {
       protocol         = "tcp"
       cidr_blocks      = ["0.0.0.0/0"]
       ipv6_cidr_blocks = ["::/0"]
-    } }
-  }
+    } 
+   }
+ }
 
   tags = {
     env = "prod"
@@ -1092,7 +1094,7 @@ Two areas of terraform behavior are determined by backend:
 
 terraform {
   required_providers{
-   aws{
+   aws={
        source = "hashicorp/aws" 	
        version = "5.22.0"			--> aws provider version	
       }
@@ -1240,7 +1242,7 @@ resource "aws_instance" "web"{
  key_name = aws_key_pair.demo.key_name
  security_groups = [aws_security_group.allow_tls]
  
- user_date = file("script.sh") or var.user_data
+ user_date = file("./script.sh") or var.user_data
  tags = {
    Name = "WebServer"
   }
@@ -1575,7 +1577,7 @@ resource "aws_eks_cluster" "demo_cluster"{
    }
 
  depends_on = [aws_iam_role_polic_attachment.eks_managed_policy]
- }
+}
 
 output "endpoint"{
   value = aws_eks_cluster.demo_cluster.endpoint
@@ -1902,4 +1904,37 @@ If you encounter a serious error and need to rollback, you can run terraform des
 7. use modularization 
 8. automate terraform deployment and testing using CI/CD
 9. segregate terraform config as per env using workspace feature. 
+
+
+12. How do you manage credentials in Terraform?
+terraform provides various ways to handle credentials, following are few
+1. variable block with sensitive = true
+2. aws profiles whcih can be used in provider block
+3. use env variables to store credentials 
+4. third party integration to handle credentials like aws secret manager or hashicorp vault using data sources
+
+13. Why Terraform? why not others?
+14. Write Terraform code for an S3 bucket and attach a policy.
+15. Write a Terraform code for ASG?
+16. What are the Terraform modules? Have used any modules in the project?
+
+resource "aws_s3_bucket_policy" "static-website-policy"{
+   bucket = aws_s3_bucket.static-website.id
+   policy = <<EOF
+   {
+      "Version": "2012-10-17",
+      "Statement": [
+       {
+         "Effect":"Allow",
+         "Principal":"*",
+         "Action":["s3:GetObject"],
+         "Resource":[
+           "${aws_s3_bucket.static-website.arn}",
+           "${aws_s3_bucket.static-website.arn}/"
+         ]
+       }
+     ]
+}
+EOF
+}
 
